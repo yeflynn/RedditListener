@@ -8,9 +8,11 @@ from datetime import datetime, timedelta
 import re
 from typing import List, Dict, Optional
 import time
+from logger_config import get_logger
 
 class RedditScraper:
     def __init__(self):
+        self.logger = get_logger('RedditListener')
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
@@ -74,7 +76,7 @@ class RedditScraper:
         subreddit_name = self.extract_subreddit_name(subreddit_url)
         
         if not subreddit_name:
-            print(f"Could not extract subreddit name from URL: {subreddit_url}")
+            self.logger.error(f"Could not extract subreddit name from URL: {subreddit_url}")
             return threads
         
         # Normalize URL
@@ -82,16 +84,17 @@ class RedditScraper:
             subreddit_url = f'https://www.reddit.com/r/{subreddit_name}/'
         
         try:
-            print(f"Fetching threads from {subreddit_url}...")
+            self.logger.info(f"Fetching threads from {subreddit_url}...")
             response = requests.get(subreddit_url, headers=self.headers, timeout=10)
             response.raise_for_status()
+            self.logger.debug(f"HTTP response status: {response.status_code}")
             
             soup = BeautifulSoup(response.text, 'html.parser')
             
             # Find all post elements (shreddit-post tags)
             posts = soup.find_all('shreddit-post', limit=max_threads * 2)  # Get more to filter
             
-            print(f"Found {len(posts)} post elements")
+            self.logger.info(f"Found {len(posts)} post elements on page")
             
             for post in posts:
                 if len(threads) >= max_threads:
@@ -171,18 +174,18 @@ class RedditScraper:
                         }
                         
                         threads.append(thread_data)
-                        print(f"Scraped: {title[:50]}...")
+                        self.logger.debug(f"Scraped thread: {title}")
                 
                 except Exception as e:
-                    print(f"Error parsing post: {e}")
+                    self.logger.warning(f"Error parsing post: {e}")
                     continue
             
-            print(f"Successfully scraped {len(threads)} threads")
+            self.logger.info(f"Successfully scraped {len(threads)} threads from {subreddit_name}")
             
         except requests.RequestException as e:
-            print(f"Error fetching subreddit: {e}")
+            self.logger.error(f"Error fetching subreddit {subreddit_url}: {e}")
         except Exception as e:
-            print(f"Unexpected error: {e}")
+            self.logger.error(f"Unexpected error scraping {subreddit_url}: {e}", exc_info=True)
         
         return threads
     

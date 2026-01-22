@@ -5,6 +5,7 @@ Uses Google's Gemini API via OpenAI-compatible interface to summarize Reddit thr
 from openai import OpenAI
 import os
 from typing import Optional
+from logger_config import get_logger
 
 class ThreadSummarizer:
     def __init__(self, api_key: Optional[str] = None):
@@ -14,18 +15,19 @@ class ThreadSummarizer:
         Args:
             api_key: Gemini API key (if None, will try to get from environment)
         """
+        self.logger = get_logger('RedditListener')
         self.api_key = api_key or os.getenv('GEMINI_API_KEY')
         
         if not self.api_key:
-            print("Warning: No Gemini API key provided. Summarization will not work.")
+            self.logger.warning("No Gemini API key provided. Summarization will not work.")
             self.client = None
         else:
             try:
                 # Use OpenAI-compatible API
                 self.client = OpenAI(api_key=self.api_key)
-                print("Gemini AI initialized successfully")
+                self.logger.info("Gemini AI initialized successfully")
             except Exception as e:
-                print(f"Error initializing Gemini: {e}")
+                self.logger.error(f"Error initializing Gemini: {e}", exc_info=True)
                 self.client = None
     
     def summarize_thread(self, title: str, content: str) -> str:
@@ -40,9 +42,11 @@ class ThreadSummarizer:
             Summary text
         """
         if not self.client:
+            self.logger.warning("Summarization attempted without API key")
             return "Summarization unavailable - No API key configured"
         
         try:
+            self.logger.debug(f"Generating summary for thread: {title[:50]}...")
             prompt = f"""Summarize the following Reddit thread in 2-3 concise sentences. 
 Focus on the main issue, question, or story being discussed.
 
@@ -58,11 +62,12 @@ Provide a clear, objective summary:"""
                 max_tokens=200
             )
             summary = response.choices[0].message.content.strip()
+            self.logger.info(f"Successfully generated summary for: {title[:50]}...")
             
             return summary
             
         except Exception as e:
-            print(f"Error generating summary: {e}")
+            self.logger.error(f"Error generating summary for '{title}': {e}", exc_info=True)
             return f"Error generating summary: {str(e)}"
     
     def batch_summarize(self, threads: list) -> dict:

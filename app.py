@@ -17,19 +17,27 @@ from database import (
 )
 from reddit_scraper import RedditScraper
 from summarizer import ThreadSummarizer
+from logger_config import setup_logger, get_logger
 
 # Load environment variables
 load_dotenv()
+
+# Initialize logger
+logger = setup_logger('RedditListener')
 
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
 
 # Initialize database on startup
+logger.info('Initializing database...')
 init_database()
+logger.info('Database initialized successfully')
 
 # Initialize scraper and summarizer
+logger.info('Initializing Reddit scraper and AI summarizer...')
 scraper = RedditScraper()
 summarizer = ThreadSummarizer()
+logger.info('Scraper and summarizer initialized successfully')
 
 # Store progress data in memory
 progress_data = {}
@@ -54,16 +62,21 @@ def download_with_progress():
         end_date = request.form.get('end_date', '')
         max_threads = int(request.form.get('max_threads', 10))
         
+        logger.info(f'Download request received: subreddit={subreddit_url}, max_threads={max_threads}, date_range={start_date} to {end_date}')
+        
         if not subreddit_url:
+            logger.warning('Download request rejected: No subreddit URL provided')
             flash('Please provide a subreddit URL', 'error')
             return redirect(url_for('index'))
         
         if max_threads < 1 or max_threads > 100:
+            logger.warning(f'Download request rejected: Invalid max_threads={max_threads}')
             flash('Max threads must be between 1 and 100', 'error')
             return redirect(url_for('index'))
         
         # Generate unique progress ID
         progress_id = str(uuid.uuid4())
+        logger.info(f'Generated progress ID: {progress_id}')
         
         # Store parameters for the download process
         progress_data[progress_id] = {
@@ -83,6 +96,7 @@ def download_with_progress():
                              max_threads=max_threads)
         
     except Exception as e:
+        logger.error(f'Error in download_with_progress: {str(e)}', exc_info=True)
         flash(f'Error: {str(e)}', 'error')
         return redirect(url_for('index'))
 
@@ -182,8 +196,11 @@ if __name__ == '__main__':
 @app.route('/progress_stream/<progress_id>')
 def progress_stream(progress_id):
     """Server-Sent Events stream for real-time progress"""
+    logger.info(f'Progress stream started for ID: {progress_id}')
+    
     def generate():
         if progress_id not in progress_data:
+            logger.warning(f'Invalid progress ID requested: {progress_id}')
             yield f"data: {json.dumps({'error': 'Invalid progress ID'})}\n\n"
             return
         
@@ -200,10 +217,13 @@ def progress_stream(progress_id):
             time.sleep(0.5)
             
             # Scrape threads with progress updates
+            logger.info(f'Starting scrape: {subreddit_url}, max_threads={max_threads}')
             yield f"data: {json.dumps({'message': f'📡 Fetching threads (max: {max_threads})...', 'type': 'info'})}\n\n"
             threads = scraper.scrape_subreddit(subreddit_url, max_threads)
+            logger.info(f'Scrape completed: Found {len(threads) if threads else 0} threads')
             
             if not threads:
+                logger.warning(f'No threads found for {subreddit_url}')
                 yield f"data: {json.dumps({'message': '❌ No threads found or error occurred', 'type': 'error'})}\n\n"
                 yield f"data: {json.dumps({'completed': True, 'saved_count': 0})}\n\n"
                 return
@@ -216,6 +236,7 @@ def progress_stream(progress_id):
                 yield f"data: {json.dumps({'message': f'📅 Filtering by date range...', 'type': 'info'})}\n\n"
                 original_count = len(threads)
                 threads = scraper.filter_by_date_range(threads, start_date, end_date)
+                logger.info(f'Date filtering: {len(threads)}/{original_count} threads match range {start_date} to {end_date}')
                 yield f"data: {json.dumps({'message': f'📊 Filtered: {len(threads)}/{original_count} threads match date range', 'type': 'info'})}\n\n"
                 time.sleep(0.3)
             
@@ -227,12 +248,15 @@ def progress_stream(progress_id):
                 if insert_thread(thread):
                     saved_count += 1
                     title_preview = thread['title'][:50] + '...' if len(thread['title']) > 50 else thread['title']
+                    logger.debug(f'Saved thread {i}/{len(threads)}: {thread["title"]}')
                     yield f"data: {json.dumps({'message': f'✓ Saved ({i}/{len(threads)}): {title_preview}', 'type': 'progress'})}\n\n"
                     time.sleep(0.2)  # Small delay for visibility
                 else:
+                    logger.debug(f'Skipped duplicate thread {i}/{len(threads)}: {thread["title"]}')
                     yield f"data: {json.dumps({'message': f'⊘ Skipped ({i}/{len(threads)}): Duplicate thread', 'type': 'warning'})}\n\n"
             
             # Final summary
+            logger.info(f'Download completed: Saved {saved_count} threads from {subreddit_url}')
             yield f"data: {json.dumps({'message': f'🎉 Successfully saved {saved_count} threads!', 'type': 'success'})}\n\n"
             time.sleep(0.5)
             
@@ -244,6 +268,7 @@ def progress_stream(progress_id):
             data['saved_count'] = saved_count
             
         except Exception as e:
+            logger.error(f'Error in progress_stream: {str(e)}', exc_info=True)
             yield f"data: {json.dumps({'message': f'❌ Error: {str(e)}', 'type': 'error'})}\n\n"
             yield f"data: {json.dumps({'completed': True, 'saved_count': 0})}\n\n"
     
