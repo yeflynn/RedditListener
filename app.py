@@ -58,11 +58,12 @@ def download_with_progress():
     try:
         # Get form data
         subreddit_url = request.form.get('subreddit_url', '').strip()
-        start_date = request.form.get('start_date', '')
-        end_date = request.form.get('end_date', '')
+        skip_date_filter = request.form.get('skip_date_filter') == 'on'
+        start_date = request.form.get('start_date', '') if not skip_date_filter else ''
+        end_date = request.form.get('end_date', '') if not skip_date_filter else ''
         max_threads = int(request.form.get('max_threads', 10))
         
-        logger.info(f'Download request received: subreddit={subreddit_url}, max_threads={max_threads}, date_range={start_date} to {end_date}')
+        logger.info(f'Download request received: subreddit={subreddit_url}, max_threads={max_threads}, skip_date_filter={skip_date_filter}, date_range={start_date} to {end_date}')
         
         if not subreddit_url:
             logger.warning('Download request rejected: No subreddit URL provided')

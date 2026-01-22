@@ -14,8 +14,16 @@ class RedditScraper:
     def __init__(self):
         self.logger = get_logger('RedditListener')
         self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
         }
+        self.last_request_time = 0
+        self.min_request_interval = 2  # Minimum 2 seconds between requests
     
     def extract_subreddit_name(self, url: str) -> Optional[str]:
         """Extract subreddit name from URL"""
@@ -84,8 +92,17 @@ class RedditScraper:
             subreddit_url = f'https://www.reddit.com/r/{subreddit_name}/'
         
         try:
+            # Rate limiting to avoid blocks
+            current_time = time.time()
+            time_since_last_request = current_time - self.last_request_time
+            if time_since_last_request < self.min_request_interval:
+                sleep_time = self.min_request_interval - time_since_last_request
+                self.logger.debug(f"Rate limiting: sleeping for {sleep_time:.2f} seconds")
+                time.sleep(sleep_time)
+            
             self.logger.info(f"Fetching threads from {subreddit_url}...")
             response = requests.get(subreddit_url, headers=self.headers, timeout=10)
+            self.last_request_time = time.time()
             response.raise_for_status()
             self.logger.debug(f"HTTP response status: {response.status_code}")
             
@@ -122,6 +139,9 @@ class RedditScraper:
                     flair = None
                     content = ""
                     
+                    # Known flair patterns
+                    known_flairs = ['Discussion', 'Scam', 'Support', 'Question', 'Meta', 'General']
+                    
                     # Look for patterns in the text
                     for i, line in enumerate(lines):
                         # Author pattern (u/username)
@@ -137,20 +157,45 @@ class RedditScraper:
                                 posted_time = line
                         
                         # Flair patterns
-                        elif line in ['Discussion', 'Scam', 'Support', 'Question', 'Meta']:
+                        elif line in known_flairs:
                             flair = line
                         
                         # Title is usually one of the longer lines before content
-                        elif len(line) > 20 and not title and 'ago' not in line:
+                        elif len(line) > 20 and not title and 'ago' not in line and 'u/' not in line:
                             title = line
                     
+                    # Clean up title - remove metadata patterns
+                    if title:
+                        # Remove author mentions (u/username)
+                        title = re.sub(r'\s*u/[\w-]+\s*', ' ', title)
+                        # Remove bullet points and separators
+                        title = re.sub(r'\s*[•·]\s*', ' ', title)
+                        # Remove known flairs
+                        for flair_text in known_flairs:
+                            title = title.replace(flair_text, '')
+                        # Remove extra whitespace
+                        title = ' '.join(title.split())
+                        # If title appears twice (common pattern), take first occurrence
+                        words = title.split()
+                        if len(words) > 10:
+                            # Check if first half repeats
+                            half = len(words) // 2
+                            first_half = ' '.join(words[:half])
+                            if first_half in title[len(first_half):]:
+                                title = first_half
+                        title = title.strip()
+                    
                     # If we couldn't parse well, try alternative method
-                    if not title:
+                    if not title or len(title) < 5:
                         # Get all text and take first substantial line
                         for line in lines:
                             if len(line) > 15 and 'u/' not in line and 'ago' not in line:
-                                title = line
-                                break
+                                # Clean this title too
+                                title = re.sub(r'\s*u/[\w-]+\s*', ' ', line)
+                                title = re.sub(r'\s*[•·]\s*', ' ', title)
+                                title = ' '.join(title.split()).strip()
+                                if len(title) >= 5:
+                                    break
                     
                     # Content is usually after the metadata
                     content_start = False
@@ -189,9 +234,16 @@ class RedditScraper:
             
             self.logger.info(f"Successfully scraped {len(threads)} threads from {subreddit_name}")
             
+        except requests.HTTPError as e:
+            if e.response.status_code == 403:
+                self.logger.error(f"Access blocked by Reddit (403 Forbidden). Reddit may be rate-limiting or blocking automated requests.")
+                self.logger.error(f"Try again in a few minutes, or consider using Reddit's official API.")
+            else:
+                self.logger.error(f"HTTP error fetching threads: {e}")
+            return []
         except requests.RequestException as e:
-            self.logger.error(f"Error fetching subreddit {subreddit_url}: {e}")
-        except Exception as e:
+            self.logger.error(f"Error fetching threads: {e}")
+            return []     except Exception as e:
             self.logger.error(f"Unexpected error scraping {subreddit_url}: {e}", exc_info=True)
         
         return threads

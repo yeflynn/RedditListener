@@ -22,7 +22,19 @@
             <small>Enter the full URL or just the subreddit name (e.g., r/FacebookMarketplace)</small>
         </div>
 
-        <div class="form-row">
+        <div class="form-group">
+            <label>
+                <input 
+                    type="checkbox" 
+                    id="skip_date_filter" 
+                    name="skip_date_filter"
+                    onchange="toggleDateInputs()"
+                >
+                Skip date filtering (download all threads regardless of date)
+            </label>
+        </div>
+
+        <div class="form-row" id="date_inputs">
             <div class="form-group">
                 <label for="start_date">Start Date (Optional):</label>
                 <input 
@@ -41,6 +53,27 @@
                 >
             </div>
         </div>
+
+        <script>
+        function toggleDateInputs() {
+            const checkbox = document.getElementById('skip_date_filter');
+            const dateInputs = document.getElementById('date_inputs');
+            const startDate = document.getElementById('start_date');
+            const endDate = document.getElementById('end_date');
+            
+            if (checkbox.checked) {
+                dateInputs.style.opacity = '0.5';
+                dateInputs.style.pointerEvents = 'none';
+                startDate.disabled = true;
+                endDate.disabled = true;
+            } else {
+                dateInputs.style.opacity = '1';
+                dateInputs.style.pointerEvents = 'auto';
+                startDate.disabled = false;
+                endDate.disabled = false;
+            }
+        }
+        </script>
 
         <div class="form-group">
             <label for="max_threads">Max Threads to Download:</label>
