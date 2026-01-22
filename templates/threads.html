@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+
+{% block title %}Downloaded Threads - RedditListener{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>Downloaded Threads</h2>
+    <div class="header-actions">
+        <a href="{{ url_for('index') }}" class="btn btn-secondary">📥 Download More</a>
+        {% if threads %}
+        <form method="POST" action="{{ url_for('summarize_all_threads') }}" style="display: inline;">
+            <button type="submit" class="btn btn-primary">✨ Summarize All</button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+
+{% if not threads %}
+<div class="empty-state">
+    <p>No threads downloaded yet.</p>
+    <a href="{{ url_for('index') }}" class="btn btn-primary">Download Your First Threads</a>
+</div>
+{% else %}
+<div class="threads-stats">
+    <p>Total threads: <strong>{{ threads|length }}</strong></p>
+    <p>Summarized: <strong>{{ threads|selectattr('summary')|list|length }}</strong></p>
+</div>
+
+<div class="threads-list">
+    {% for thread in threads %}
+    <div class="thread-card">
+        <div class="thread-header">
+            <span class="thread-flair">{{ thread.flair or 'General' }}</span>
+            <span class="thread-subreddit">r/{{ thread.subreddit }}</span>
+        </div>
+        
+        <h3 class="thread-title">
+            <a href="{{ url_for('view_thread', thread_id=thread.id) }}">
+                {{ thread.title }}
+            </a>
+        </h3>
+        
+        <div class="thread-meta">
+            <span>👤 {{ thread.author }}</span>
+            <span>🕒 {{ thread.posted_time }}</span>
+        </div>
+        
+        <p class="thread-preview">{{ thread.content[:200] }}{% if thread.content|length > 200 %}...{% endif %}</p>
+        
+        {% if thread.summary %}
+        <div class="thread-summary">
+            <strong>AI Summary:</strong>
+            <p>{{ thread.summary }}</p>
+        </div>
+        {% else %}
+        <div class="thread-actions">
+            <button 
+                class="btn btn-small btn-primary summarize-btn" 
+                data-thread-id="{{ thread.id }}"
+            >
+                ✨ Generate Summary
+            </button>
+        </div>
+        {% endif %}
+        
+        <div class="thread-footer">
+            <a href="{{ thread.url }}" target="_blank" class="btn btn-link">View on Reddit →</a>
+            <a href="{{ url_for('view_thread', thread_id=thread.id) }}" class="btn btn-link">View Details →</a>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const summarizeBtns = document.querySelectorAll('.summarize-btn');
+    
+    summarizeBtns.forEach(btn => {
+        btn.addEventListener('click', async function() {
+            const threadId = this.getAttribute('data-thread-id');
+            const originalText = this.textContent;
+            
+            this.disabled = true;
+            this.textContent = '⏳ Generating...';
+            
+            try {
+                const response = await fetch(`/summarize/${threadId}`, {
+                    method: 'POST'
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Reload page to show summary
+                    window.location.reload();
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown error'));
+                    this.disabled = false;
+                    this.textContent = originalText;
+                }
+            } catch (error) {
+                alert('Error generating summary: ' + error);
+                this.disabled = false;
+                this.textContent = originalText;
+            }
+        });
+    });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}{{ thread.title }} - RedditListener{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <a href="{{ url_for('view_threads') }}" class="btn btn-secondary">← Back to Threads</a>
+</div>
+
+<div class="thread-detail">
+    <div class="thread-detail-header">
+        <div class="thread-badges">
+            <span class="badge badge-subreddit">r/{{ thread.subreddit }}</span>
+            <span class="badge badge-flair">{{ thread.flair or 'General' }}</span>
+        </div>
+        <h1>{{ thread.title }}</h1>
+        
+        <div class="thread-detail-meta">
+            <span>👤 Posted by {{ thread.author }}</span>
+            <span>🕒 {{ thread.posted_time }}</span>
+            <span>📅 Downloaded: {{ thread.downloaded_at[:10] }}</span>
+        </div>
+    </div>
+
+    <div class="thread-detail-content">
+        <h3>Thread Content</h3>
+        <div class="content-box">
+            {{ thread.content }}
+        </div>
+    </div>
+
+    {% if thread.summary %}
+    <div class="thread-detail-summary">
+        <h3>AI Summary</h3>
+        <div class="summary-box">
+            {{ thread.summary }}
+        </div>
+        <p class="summary-meta">Summarized at: {{ thread.summarized_at[:19] if thread.summarized_at else 'N/A' }}</p>
+    </div>
+    {% else %}
+    <div class="thread-detail-actions">
+        <button 
+            id="summarize-btn" 
+            class="btn btn-primary"
+            data-thread-id="{{ thread.id }}"
+        >
+            ✨ Generate AI Summary
+        </button>
+        <div id="summary-result" class="summary-result" style="display: none;"></div>
+    </div>
+    {% endif %}
+
+    <div class="thread-detail-links">
+        <a href="{{ thread.url }}" target="_blank" class="btn btn-primary">
+            View Original Thread on Reddit →
+        </a>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const summarizeBtn = document.getElementById('summarize-btn');
+    
+    if (summarizeBtn) {
+        summarizeBtn.addEventListener('click', async function() {
+            const threadId = this.getAttribute('data-thread-id');
+            const resultDiv = document.getElementById('summary-result');
+            
+            this.disabled = true;
+            this.textContent = '⏳ Generating summary...';
+            
+            try {
+                const response = await fetch(`/summarize/${threadId}`, {
+                    method: 'POST'
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    resultDiv.style.display = 'block';
+                    resultDiv.innerHTML = `
+                        <h3>AI Summary</h3>
+                        <div class="summary-box">${data.summary}</div>
+                    `;
+                    this.style.display = 'none';
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown error'));
+                    this.disabled = false;
+                    this.textContent = '✨ Generate AI Summary';
+                }
+            } catch (error) {
+                alert('Error generating summary: ' + error);
+                this.disabled = false;
+                this.textContent = '✨ Generate AI Summary';
+            }
+        });
+    }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}RedditListener - Download Threads{% endblock %}
+
+{% block content %}
+<div class="hero">
+    <h2>Download Reddit Threads</h2>
+    <p>Scrape and analyze Reddit threads with AI-powered summaries</p>
+</div>
+
+<div class="form-container">
+    <form method="POST" action="{{ url_for('download_threads') }}" class="download-form">
+        <div class="form-group">
+            <label for="subreddit_url">Subreddit URL or Name:</label>
+            <input 
+                type="text" 
+                id="subreddit_url" 
+                name="subreddit_url" 
+                placeholder="https://www.reddit.com/r/FacebookMarketplace/ or r/FacebookMarketplace"
+                required
+            >
+            <small>Enter the full URL or just the subreddit name (e.g., r/FacebookMarketplace)</small>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label for="start_date">Start Date (Optional):</label>
+                <input 
+                    type="date" 
+                    id="start_date" 
+                    name="start_date"
+                >
+            </div>
+
+            <div class="form-group">
+                <label for="end_date">End Date (Optional):</label>
+                <input 
+                    type="date" 
+                    id="end_date" 
+                    name="end_date"
+                >
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="max_threads">Max Threads to Download:</label>
+            <input 
+                type="number" 
+                id="max_threads" 
+                name="max_threads" 
+                value="10" 
+                min="1" 
+                max="100"
+                required
+            >
+            <small>Maximum: 100 threads</small>
+        </div>
+
+        <button type="submit" class="btn btn-primary">
+            📥 Download Threads
+        </button>
+    </form>
+</div>
+
+<div class="info-section">
+    <h3>How It Works</h3>
+    <div class="steps">
+        <div class="step">
+            <div class="step-number">1</div>
+            <h4>Enter Subreddit</h4>
+            <p>Provide the subreddit URL or name you want to scrape</p>
+        </div>
+        <div class="step">
+            <div class="step-number">2</div>
+            <h4>Set Parameters</h4>
+            <p>Choose date range and maximum number of threads</p>
+        </div>
+        <div class="step">
+            <div class="step-number">3</div>
+            <h4>Download & Store</h4>
+            <p>Threads are scraped and saved to local database</p>
+        </div>
+        <div class="step">
+            <div class="step-number">4</div>
+            <h4>AI Summarization</h4>
+            <p>Generate summaries using Gemini AI</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
