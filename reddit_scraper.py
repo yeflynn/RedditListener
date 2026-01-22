@@ -243,8 +243,10 @@ class RedditScraper:
             return []
         except requests.RequestException as e:
             self.logger.error(f"Error fetching threads: {e}")
-            return []     except Exception as e:
+            return []
+        except Exception as e:
             self.logger.error(f"Unexpected error scraping {subreddit_url}: {e}", exc_info=True)
+            return []
         
         return threads
     
