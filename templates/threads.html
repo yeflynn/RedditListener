@@ -48,20 +48,20 @@
         <p class="thread-preview">{{ thread.content[:200] }}{% if thread.content|length > 200 %}...{% endif %}</p>
         
         {% if thread.summary %}
-        <div class="thread-summary">
+        <div class="thread-summary" id="summary-{{ thread.id }}">
             <strong>AI Summary:</strong>
-            <p>{{ thread.summary }}</p>
+            <p class="summary-text">{{ thread.summary }}</p>
         </div>
-        {% else %}
+        {% endif %}
+        
         <div class="thread-actions">
             <button 
                 class="btn btn-small btn-primary summarize-btn" 
                 data-thread-id="{{ thread.id }}"
             >
-                ✨ Generate Summary
+                {% if thread.summary %}♻️ Regenerate{% else %}✨ Generate Summary{% endif %}
             </button>
         </div>
-        {% endif %}
         
         <div class="thread-footer">
             <a href="{{ thread.url }}" target="_blank" class="btn btn-link">View on Reddit →</a>
@@ -82,6 +82,7 @@ document.addEventListener('DOMContentLoaded', function() {
         btn.addEventListener('click', async function() {
             const threadId = this.getAttribute('data-thread-id');
             const originalText = this.textContent;
+            const isRegenerate = originalText.includes('Regenerate');
             
             this.disabled = true;
             this.textContent = '⏳ Generating...';
@@ -94,8 +95,38 @@ document.addEventListener('DOMContentLoaded', function() {
                 const data = await response.json();
                 
                 if (data.success) {
-                    // Reload page to show summary
-                    window.location.reload();
+                    // Update summary inline without page reload
+                    const summaryDiv = document.getElementById(`summary-${threadId}`);
+                    
+                    if (summaryDiv) {
+                        // Update existing summary
+                        const summaryText = summaryDiv.querySelector('.summary-text');
+                        summaryText.textContent = data.summary;
+                        
+                        // Add flash effect
+                        summaryDiv.style.animation = 'flash 0.5s';
+                        setTimeout(() => {
+                            summaryDiv.style.animation = '';
+                        }, 500);
+                    } else {
+                        // Create new summary div
+                        const threadCard = this.closest('.thread-card');
+                        const threadPreview = threadCard.querySelector('.thread-preview');
+                        
+                        const newSummaryDiv = document.createElement('div');
+                        newSummaryDiv.className = 'thread-summary';
+                        newSummaryDiv.id = `summary-${threadId}`;
+                        newSummaryDiv.innerHTML = `
+                            <strong>AI Summary:</strong>
+                            <p class="summary-text">${data.summary}</p>
+                        `;
+                        
+                        threadPreview.insertAdjacentElement('afterend', newSummaryDiv);
+                    }
+                    
+                    // Update button text
+                    this.textContent = '♻️ Regenerate';
+                    this.disabled = false;
                 } else {
                     alert('Error: ' + (data.error || 'Unknown error'));
                     this.disabled = false;
@@ -110,4 +141,10 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 </script>
+<style>
+@keyframes flash {
+    0%, 100% { background-color: transparent; }
+    50% { background-color: rgba(74, 144, 226, 0.2); }
+}
+</style>
 {% endblock %}
