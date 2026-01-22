@@ -76,6 +76,19 @@
         </script>
 
         <div class="form-group">
+            <label for="gemini_model">Gemini AI Model:</label>
+            <select 
+                id="gemini_model" 
+                name="gemini_model"
+            >
+                <option value="gemini-2.5-flash" selected>Gemini 2.5 Flash (Latest, Fastest)</option>
+                <option value="gpt-4.1-mini">GPT-4.1 Mini (Balanced)</option>
+                <option value="gpt-4.1-nano">GPT-4.1 Nano (Fastest, Lightweight)</option>
+            </select>
+            <small>Select the AI model for generating thread summaries</small>
+        </div>
+
+        <div class="form-group">
             <label for="max_threads">Max Threads to Download:</label>
             <input 
                 type="number" 

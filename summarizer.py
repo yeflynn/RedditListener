@@ -46,13 +46,14 @@ class ThreadSummarizer:
                 self.client = None
                 self.api_type = None
     
-    def summarize_thread(self, title: str, content: str) -> str:
+    def summarize_thread(self, title: str, content: str, model: str = None) -> str:
         """
         Summarize a Reddit thread using Gemini AI
         
         Args:
             title: Thread title
             content: Thread content
+            model: Gemini model to use (default: gemini-2.0-flash-exp)
             
         Returns:
             Summary text
@@ -72,8 +73,14 @@ Content: {content}
 
 Provide a clear, objective summary:"""
             
+            # Use provided model or default
+            if not model:
+                model = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
+            
+            self.logger.debug(f"Using model: {model}")
+            
             response = self.client.chat.completions.create(
-                model='gemini-2.0-flash-exp',
+                model=model,
                 messages=[{'role': 'user', 'content': prompt}],
                 max_tokens=200
             )

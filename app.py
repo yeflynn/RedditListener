@@ -62,8 +62,9 @@ def download_with_progress():
         start_date = request.form.get('start_date', '') if not skip_date_filter else ''
         end_date = request.form.get('end_date', '') if not skip_date_filter else ''
         max_threads = int(request.form.get('max_threads', 10))
+        gemini_model = request.form.get('gemini_model', 'gemini-2.5-flash')
         
-        logger.info(f'Download request received: subreddit={subreddit_url}, max_threads={max_threads}, skip_date_filter={skip_date_filter}, date_range={start_date} to {end_date}')
+        logger.info(f'Download request received: subreddit={subreddit_url}, max_threads={max_threads}, skip_date_filter={skip_date_filter}, date_range={start_date} to {end_date}, gemini_model={gemini_model}')
         
         if not subreddit_url:
             logger.warning('Download request rejected: No subreddit URL provided')
@@ -86,6 +87,7 @@ def download_with_progress():
             'start_date': start_date,
             'end_date': end_date,
             'max_threads': max_threads,
+            'gemini_model': gemini_model,
             'saved_count': 0,
             'completed': False
         }
@@ -127,10 +129,15 @@ def summarize_thread(thread_id):
         return jsonify({'error': 'Thread not found'}), 404
     
     try:
+        # Get model from request or use default
+        data = request.get_json() or {}
+        model = data.get('model', os.getenv('GEMINI_MODEL', 'gemini-2.5-flash'))
+        
         # Generate summary
         summary = summarizer.summarize_thread(
             thread['title'], 
-            thread['content']
+            thread['content'],
+            model=model
         )
         
         # Update database
