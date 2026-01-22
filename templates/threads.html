@@ -11,6 +11,9 @@
         <form method="POST" action="{{ url_for('summarize_all_threads') }}" style="display: inline;">
             <button type="submit" class="btn btn-primary">✨ Summarize All</button>
         </form>
+        <form method="POST" action="{{ url_for('clear_all') }}" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete all threads? This cannot be undone.');">
+            <button type="submit" class="btn btn-danger">🗑️ Clear All</button>
+        </form>
         {% endif %}
     </div>
 </div>

@@ -29,10 +29,17 @@ class RedditScraper:
     
     def extract_subreddit_name(self, url: str) -> Optional[str]:
         """Extract subreddit name from URL"""
+        # Clean up the URL first
+        url = url.strip()
+        
         # Match patterns like /r/subreddit or reddit.com/r/subreddit or just r/subreddit
-        match = re.search(r'/?r/([^/]+)', url)
+        match = re.search(r'/?r/([^/\s?&#]+)', url, re.IGNORECASE)
         if match:
-            return match.group(1)
+            subreddit = match.group(1).strip()
+            self.logger.info(f"Extracted subreddit name: '{subreddit}' from URL: '{url}'")
+            return subreddit
+        
+        self.logger.error(f"Could not extract subreddit name from: '{url}'")
         return None
     
     def parse_relative_time(self, time_str: str) -> str:
@@ -114,7 +121,8 @@ class RedditScraper:
             soup = BeautifulSoup(response.text, 'html.parser')
             
             # Find all post elements (shreddit-post tags)
-            posts = soup.find_all('shreddit-post', limit=max_threads * 2)  # Get more to filter
+            # Increase limit significantly to ensure we get enough posts
+            posts = soup.find_all('shreddit-post', limit=max_threads * 5)
             
             self.logger.info(f"Found {len(posts)} post elements on page")
             

@@ -13,7 +13,8 @@ from dotenv import load_dotenv
 # Import our modules
 from database import (
     init_database, insert_thread, get_all_threads, 
-    get_thread_by_id, update_thread_summary, get_threads_without_summary
+    get_thread_by_id, update_thread_summary, get_threads_without_summary,
+    clear_all_threads
 )
 from reddit_scraper import RedditScraper
 from summarizer import ThreadSummarizer
@@ -197,6 +198,22 @@ def api_thread(thread_id):
     if thread:
         return jsonify(thread)
     return jsonify({'error': 'Thread not found'}), 404
+
+@app.route('/clear_all', methods=['POST'])
+def clear_all():
+    """Clear all threads from the database"""
+    try:
+        if clear_all_threads():
+            logger.info('All threads cleared from database')
+            flash('All threads have been cleared from the database!', 'success')
+        else:
+            logger.error('Failed to clear threads from database')
+            flash('Error clearing threads', 'error')
+    except Exception as e:
+        logger.error(f'Error in clear_all route: {str(e)}', exc_info=True)
+        flash(f'Error: {str(e)}', 'error')
+    
+    return redirect(url_for('view_threads'))
 
 
 @app.route('/progress_stream/<progress_id>')
