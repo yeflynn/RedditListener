@@ -1,12 +1,12 @@
 """
 Gemini AI Summarization Module
-Uses Google's Gemini API to summarize Reddit threads
-Supports both OpenAI-compatible endpoint and native Google API
+Uses Google's native Gemini SDK to summarize Reddit threads
 """
-from openai import OpenAI
+import google.generativeai as genai
 import os
 from typing import Optional
 from logger_config import get_logger
+
 
 class ThreadSummarizer:
     def __init__(self, api_key: Optional[str] = None):
@@ -17,34 +17,26 @@ class ThreadSummarizer:
             api_key: Gemini API key (if None, will try to get from environment)
         """
         self.logger = get_logger('RedditListener')
-        # Try OPENAI_API_KEY first (for Manus sandbox), then GEMINI_API_KEY
-        self.api_key = api_key or os.getenv('OPENAI_API_KEY') or os.getenv('GEMINI_API_KEY')
+        self.api_key = api_key or os.getenv('GEMINI_API_KEY')
         
         if not self.api_key:
             self.logger.warning("No Gemini API key provided. Summarization will not work.")
-            self.client = None
-            self.api_type = None
+            self.model = None
         else:
             try:
-                # Detect API type based on key format
-                if self.api_key.startswith('AIzaSy'):
-                    # Native Google Gemini API key
-                    self.api_type = 'google'
-                    # Use OpenAI client with Google's endpoint
-                    self.client = OpenAI(
-                        api_key=self.api_key,
-                        base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
-                    )
-                    self.logger.info("Gemini AI initialized with Google endpoint")
-                else:
-                    # OpenAI-compatible API key (Manus sandbox)
-                    self.api_type = 'openai'
-                    self.client = OpenAI(api_key=self.api_key)
-                    self.logger.info("Gemini AI initialized with OpenAI-compatible endpoint")
+                # Configure the Gemini API
+                genai.configure(api_key=self.api_key)
+                
+                # Get model name from environment or use default
+                model_name = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
+                
+                # Initialize the generative model
+                self.model = genai.GenerativeModel(model_name)
+                self.logger.info(f"Gemini AI initialized with native SDK using model: {model_name}")
+                
             except Exception as e:
                 self.logger.error(f"Error initializing Gemini: {e}", exc_info=True)
-                self.client = None
-                self.api_type = None
+                self.model = None
     
     def summarize_thread(self, title: str, content: str, model: str = None) -> str:
         """
@@ -53,17 +45,26 @@ class ThreadSummarizer:
         Args:
             title: Thread title
             content: Thread content
-            model: Gemini model to use (default: gemini-2.0-flash-exp)
+            model: Gemini model to use (optional, overrides default)
             
         Returns:
             Summary text
         """
-        if not self.client:
+        if not self.model:
             self.logger.warning("Summarization attempted without API key")
             return "Summarization unavailable - No API key configured"
         
         try:
             self.logger.debug(f"Generating summary for thread: {title[:50]}...")
+            
+            # Use a different model if specified
+            if model and model != os.getenv('GEMINI_MODEL', 'gemini-2.5-flash'):
+                current_model = genai.GenerativeModel(model)
+                self.logger.debug(f"Using override model: {model}")
+            else:
+                current_model = self.model
+                self.logger.debug(f"Using default model")
+            
             prompt = f"""Summarize the following Reddit thread in 2-3 concise sentences. 
 Focus on the main issue, question, or story being discussed.
 
@@ -73,18 +74,20 @@ Content: {content}
 
 Provide a clear, objective summary:"""
             
-            # Use provided model or default
-            if not model:
-                model = os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
-            
-            self.logger.debug(f"Using model: {model}")
-            
-            response = self.client.chat.completions.create(
-                model=model,
-                messages=[{'role': 'user', 'content': prompt}],
-                max_tokens=500  # Increased from 200 to allow complete summaries
+            # Configure generation parameters
+            generation_config = genai.types.GenerationConfig(
+                max_output_tokens=500,
+                temperature=0.7,
             )
-            summary = response.choices[0].message.content.strip()
+            
+            # Generate the summary
+            response = current_model.generate_content(
+                prompt,
+                generation_config=generation_config
+            )
+            
+            # Extract the text from response
+            summary = response.text.strip()
             self.logger.info(f"Successfully generated summary ({len(summary)} chars) for: {title[:50]}...")
             
             return summary
@@ -114,3 +117,20 @@ Provide a clear, objective summary:"""
             summaries[thread_id] = summary
             
         return summaries
+    
+    def list_available_models(self) -> list:
+        """
+        List all available Gemini models
+        
+        Returns:
+            List of model names
+        """
+        try:
+            models = []
+            for model in genai.list_models():
+                if 'generateContent' in model.supported_generation_methods:
+                    models.append(model.name)
+            return models
+        except Exception as e:
+            self.logger.error(f"Error listing models: {e}")
+            return []
