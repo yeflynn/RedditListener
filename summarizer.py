@@ -1,6 +1,7 @@
 """
 Gemini AI Summarization Module
-Uses Google's Gemini API via OpenAI-compatible interface to summarize Reddit threads
+Uses Google's Gemini API to summarize Reddit threads
+Supports both OpenAI-compatible endpoint and native Google API
 """
 from openai import OpenAI
 import os
@@ -22,14 +23,28 @@ class ThreadSummarizer:
         if not self.api_key:
             self.logger.warning("No Gemini API key provided. Summarization will not work.")
             self.client = None
+            self.api_type = None
         else:
             try:
-                # Use OpenAI-compatible API
-                self.client = OpenAI(api_key=self.api_key)
-                self.logger.info("Gemini AI initialized successfully")
+                # Detect API type based on key format
+                if self.api_key.startswith('AIzaSy'):
+                    # Native Google Gemini API key
+                    self.api_type = 'google'
+                    # Use OpenAI client with Google's endpoint
+                    self.client = OpenAI(
+                        api_key=self.api_key,
+                        base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+                    )
+                    self.logger.info("Gemini AI initialized with Google endpoint")
+                else:
+                    # OpenAI-compatible API key (Manus sandbox)
+                    self.api_type = 'openai'
+                    self.client = OpenAI(api_key=self.api_key)
+                    self.logger.info("Gemini AI initialized with OpenAI-compatible endpoint")
             except Exception as e:
                 self.logger.error(f"Error initializing Gemini: {e}", exc_info=True)
                 self.client = None
+                self.api_type = None
     
     def summarize_thread(self, title: str, content: str) -> str:
         """
@@ -58,12 +73,12 @@ Content: {content}
 Provide a clear, objective summary:"""
             
             response = self.client.chat.completions.create(
-                model='gemini-2.5-flash',
+                model='gemini-2.0-flash-exp',
                 messages=[{'role': 'user', 'content': prompt}],
                 max_tokens=200
             )
             summary = response.choices[0].message.content.strip()
-            self.logger.info(f"Successfully generated summary for: {title[:50]}...")
+            self.logger.info(f"Successfully generated summary ({len(summary)} chars) for: {title[:50]}...")
             
             return summary
             
