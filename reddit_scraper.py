@@ -177,9 +177,26 @@ class RedditScraper:
                         url_elem = post.find('a', {'class': 'title'})
                         url = f"https://old.reddit.com{url_elem.get('href', '')}" if url_elem else f'https://old.reddit.com/r/{subreddit_name}/comments/{post_id}/'
                         
-                        # Extract content (self-text if available)
-                        content_elem = post.find('div', {'class': 'expando'})
-                        content = content_elem.get_text(strip=True)[:500] if content_elem else ''
+                        # Extract content (try multiple sources)
+                        content = ''
+                        
+                        # Try 1: Self-text for text posts
+                        expando_elem = post.find('div', {'class': 'expando'})
+                        if expando_elem:
+                            usertext = expando_elem.find('div', {'class': 'usertext-body'})
+                            if usertext:
+                                content = usertext.get_text(separator=' ', strip=True)[:1000]
+                        
+                        # Try 2: Get post metadata/description
+                        if not content:
+                            entry = post.find('div', {'class': 'entry'})
+                            if entry:
+                                # Get all text from entry except buttons/links
+                                content = entry.get_text(separator=' ', strip=True)[:500]
+                        
+                        # Try 3: Just use title as content if nothing else
+                        if not content or len(content) < 20:
+                            content = f"Link post: {title}" if title else "No content available"
                         
                         self.logger.debug(f"Processing old Reddit post {len(threads)+1}/{max_threads}, post_id: {post_id}")
                         
