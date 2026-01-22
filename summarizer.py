@@ -76,7 +76,7 @@ Provide a clear, objective summary:"""
             
             # Configure generation parameters
             generation_config = genai.types.GenerationConfig(
-                max_output_tokens=500,
+                max_output_tokens=1000,
                 temperature=0.7,
             )
             

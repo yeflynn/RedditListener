@@ -98,8 +98,9 @@ class RedditScraper:
             return threads
         
         # Normalize URL - use old.reddit.com for better scraping (shows 25 posts per page)
+        # Always sort by 'new' to get the latest posts
         if not subreddit_url.startswith('http'):
-            subreddit_url = f'https://old.reddit.com/r/{subreddit_name}/'
+            subreddit_url = f'https://old.reddit.com/r/{subreddit_name}/new/'
         else:
             # Convert to old.reddit.com (avoid double 'old' prefix)
             if 'old.reddit.com' not in subreddit_url:
@@ -111,6 +112,9 @@ class RedditScraper:
             # Ensure trailing slash
             if not subreddit_url.endswith('/'):
                 subreddit_url += '/'
+            # Add /new/ to sort by newest if not already specified
+            if '/new' not in subreddit_url and '/hot' not in subreddit_url and '/top' not in subreddit_url and '/rising' not in subreddit_url:
+                subreddit_url = subreddit_url.rstrip('/') + '/new/'
         
         try:
             # Rate limiting to avoid blocks with random delay
