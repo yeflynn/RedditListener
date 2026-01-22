@@ -134,6 +134,12 @@ class RedditScraper:
                     post_text = post.get_text(separator=' ', strip=True)
                     self.logger.debug(f"Raw post text length: {len(post_text)} chars")
                     
+                    # Log entire raw thread text for debugging
+                    self.logger.debug(f"Raw thread text for post {post_id}:")
+                    self.logger.debug(f"{'='*80}")
+                    self.logger.debug(post_text)
+                    self.logger.debug(f"{'='*80}")
+                    
                     # Parse the text to extract components
                     lines = [line.strip() for line in post_text.split('\n') if line.strip()]
                     
