@@ -18,10 +18,32 @@
     </div>
 </div>
 
+<!-- Tag Filter Section -->
+{% if all_tags %}
+<div class="tag-filter-section">
+    <span class="filter-label">Filter by tag:</span>
+    <a href="{{ url_for('view_threads') }}" class="tag-filter-btn {% if not current_tag %}active{% endif %}">All</a>
+    {% for tag in all_tags %}
+    <a href="{{ url_for('view_threads', tag=tag) }}" class="tag-filter-btn tag-{{ tag|lower|replace(' ', '-') }} {% if current_tag == tag %}active{% endif %}">{{ tag }}</a>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if current_tag %}
+<div class="filter-notice">
+    <p>Showing threads tagged with: <strong>{{ current_tag }}</strong> <a href="{{ url_for('view_threads') }}">(Clear filter)</a></p>
+</div>
+{% endif %}
+
 {% if not threads %}
 <div class="empty-state">
+    {% if current_tag %}
+    <p>No threads found with tag "{{ current_tag }}".</p>
+    <a href="{{ url_for('view_threads') }}" class="btn btn-secondary">Show All Threads</a>
+    {% else %}
     <p>No threads downloaded yet.</p>
     <a href="{{ url_for('index') }}" class="btn btn-primary">Download Your First Threads</a>
+    {% endif %}
 </div>
 {% else %}
 <div class="threads-stats">
@@ -47,6 +69,19 @@
             <span>👤 {{ thread.author }}</span>
             <span>🕒 {{ thread.posted_time }}</span>
         </div>
+        
+        <!-- AI Tags Display -->
+        {% if thread.ai_tags %}
+        <div class="ai-tags" id="tags-{{ thread.id }}">
+            {% for tag in thread.ai_tags.split(',') %}
+            {% if tag.strip() %}
+            <a href="{{ url_for('view_threads', tag=tag.strip()) }}" class="ai-tag tag-{{ tag.strip()|lower|replace(' ', '-') }}">{{ tag.strip() }}</a>
+            {% endif %}
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="ai-tags" id="tags-{{ thread.id }}"></div>
+        {% endif %}
         
         <p class="thread-preview">{{ thread.content[:200] }}{% if thread.content|length > 200 %}...{% endif %}</p>
         
@@ -127,6 +162,21 @@ document.addEventListener('DOMContentLoaded', function() {
                         threadPreview.insertAdjacentElement('afterend', newSummaryDiv);
                     }
                     
+                    // Update tags
+                    const tagsDiv = document.getElementById(`tags-${threadId}`);
+                    if (tagsDiv && data.tags && data.tags.length > 0) {
+                        tagsDiv.innerHTML = data.tags.map(tag => {
+                            const tagClass = tag.toLowerCase().replace(' ', '-');
+                            return `<a href="/threads?tag=${encodeURIComponent(tag)}" class="ai-tag tag-${tagClass}">${tag}</a>`;
+                        }).join('');
+                        
+                        // Add flash effect to tags
+                        tagsDiv.style.animation = 'flash 0.5s';
+                        setTimeout(() => {
+                            tagsDiv.style.animation = '';
+                        }, 500);
+                    }
+                    
                     // Update button text
                     this.textContent = '♻️ Regenerate';
                     this.disabled = false;
@@ -148,6 +198,123 @@ document.addEventListener('DOMContentLoaded', function() {
 @keyframes flash {
     0%, 100% { background-color: transparent; }
     50% { background-color: rgba(74, 144, 226, 0.2); }
+}
+
+/* Tag Filter Section */
+.tag-filter-section {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    flex-wrap: wrap;
+}
+
+.filter-label {
+    font-weight: 600;
+    color: #555;
+}
+
+.tag-filter-btn {
+    padding: 6px 14px;
+    border-radius: 20px;
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: all 0.2s;
+    background: #e9ecef;
+    color: #495057;
+}
+
+.tag-filter-btn:hover {
+    background: #dee2e6;
+}
+
+.tag-filter-btn.active {
+    background: #4a90e2;
+    color: white;
+}
+
+.tag-filter-btn.tag-scam {
+    background: #ffebee;
+    color: #c62828;
+}
+
+.tag-filter-btn.tag-scam.active {
+    background: #c62828;
+    color: white;
+}
+
+.tag-filter-btn.tag-product-quality {
+    background: #fff3e0;
+    color: #e65100;
+}
+
+.tag-filter-btn.tag-product-quality.active {
+    background: #e65100;
+    color: white;
+}
+
+.tag-filter-btn.tag-user-experience {
+    background: #e3f2fd;
+    color: #1565c0;
+}
+
+.tag-filter-btn.tag-user-experience.active {
+    background: #1565c0;
+    color: white;
+}
+
+.filter-notice {
+    padding: 10px 15px;
+    background: #e3f2fd;
+    border-radius: 6px;
+    margin-bottom: 20px;
+}
+
+.filter-notice a {
+    color: #1565c0;
+    margin-left: 10px;
+}
+
+/* AI Tags in Thread Cards */
+.ai-tags {
+    display: flex;
+    gap: 8px;
+    margin: 10px 0;
+    flex-wrap: wrap;
+    min-height: 28px;
+}
+
+.ai-tag {
+    padding: 4px 12px;
+    border-radius: 15px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.ai-tag:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.ai-tag.tag-scam {
+    background: linear-gradient(135deg, #ffcdd2, #ef9a9a);
+    color: #b71c1c;
+}
+
+.ai-tag.tag-product-quality {
+    background: linear-gradient(135deg, #ffe0b2, #ffcc80);
+    color: #e65100;
+}
+
+.ai-tag.tag-user-experience {
+    background: linear-gradient(135deg, #bbdefb, #90caf9);
+    color: #0d47a1;
 }
 </style>
 {% endblock %}

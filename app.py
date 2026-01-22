@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 from database import (
     init_database, insert_thread, get_all_threads, 
     get_thread_by_id, update_thread_summary, get_threads_without_summary,
-    clear_all_threads
+    clear_all_threads, get_threads_by_tag, get_all_unique_tags
 )
 from reddit_scraper import RedditScraper
 from summarizer import ThreadSummarizer
@@ -106,9 +106,19 @@ def download_with_progress():
 
 @app.route('/threads')
 def view_threads():
-    """Display all downloaded threads"""
-    threads = get_all_threads()
-    return render_template('threads.html', threads=threads)
+    """Display all downloaded threads with optional tag filtering"""
+    # Get filter tag from query parameter
+    filter_tag = request.args.get('tag', '')
+    
+    if filter_tag:
+        threads = get_threads_by_tag(filter_tag)
+    else:
+        threads = get_all_threads()
+    
+    # Get all unique tags for the filter dropdown
+    all_tags = get_all_unique_tags()
+    
+    return render_template('threads.html', threads=threads, all_tags=all_tags, current_tag=filter_tag)
 
 @app.route('/thread/<int:thread_id>')
 def view_thread(thread_id):
@@ -123,7 +133,7 @@ def view_thread(thread_id):
 
 @app.route('/summarize/<int:thread_id>', methods=['POST'])
 def summarize_thread(thread_id):
-    """Generate summary for a specific thread"""
+    """Generate summary and tags for a specific thread"""
     thread = get_thread_by_id(thread_id)
     
     if not thread:
@@ -135,19 +145,24 @@ def summarize_thread(thread_id):
         data = request.get_json(force=True, silent=True) or {}
         model = data.get('model', os.getenv('GEMINI_MODEL', 'gemini-2.5-flash'))
         
-        # Generate summary
-        summary = summarizer.summarize_thread(
+        # Generate summary and tags
+        result = summarizer.summarize_and_tag_thread(
             thread['title'], 
             thread['content'],
             model=model
         )
         
-        # Update database
-        update_thread_summary(thread_id, summary)
+        summary = result['summary']
+        tags = result['tags']
+        tags_str = ','.join(tags) if tags else ''
+        
+        # Update database with summary and tags
+        update_thread_summary(thread_id, summary, tags_str)
         
         return jsonify({
             'success': True,
-            'summary': summary
+            'summary': summary,
+            'tags': tags
         })
         
     except Exception as e:
@@ -157,7 +172,7 @@ def summarize_thread(thread_id):
 
 @app.route('/summarize_all', methods=['POST'])
 def summarize_all_threads():
-    """Generate summaries for all threads without summaries"""
+    """Generate summaries and tags for all threads without summaries"""
     try:
         threads = get_threads_without_summary()
         
@@ -168,11 +183,14 @@ def summarize_all_threads():
         summarized_count = 0
         for thread in threads:
             try:
-                summary = summarizer.summarize_thread(
+                result = summarizer.summarize_and_tag_thread(
                     thread['title'],
                     thread['content']
                 )
-                update_thread_summary(thread['id'], summary)
+                summary = result['summary']
+                tags = result['tags']
+                tags_str = ','.join(tags) if tags else ''
+                update_thread_summary(thread['id'], summary, tags_str)
                 summarized_count += 1
             except Exception as e:
                 print(f"Error summarizing thread {thread['id']}: {e}")

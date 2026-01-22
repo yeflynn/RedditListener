@@ -27,10 +27,17 @@ def init_database():
             content TEXT,
             url TEXT,
             summary TEXT,
+            ai_tags TEXT,
             downloaded_at TEXT NOT NULL,
             summarized_at TEXT
         )
     ''')
+    
+    # Add ai_tags column if it doesn't exist (for existing databases)
+    try:
+        cursor.execute('ALTER TABLE threads ADD COLUMN ai_tags TEXT')
+    except sqlite3.OperationalError:
+        pass  # Column already exists
     
     conn.commit()
     conn.close()
@@ -96,17 +103,24 @@ def get_thread_by_id(thread_id: int) -> Optional[Dict]:
     conn.close()
     return dict(row) if row else None
 
-def update_thread_summary(thread_id: int, summary: str) -> bool:
-    """Update the summary for a specific thread"""
+def update_thread_summary(thread_id: int, summary: str, ai_tags: str = None) -> bool:
+    """Update the summary and AI tags for a specific thread"""
     try:
         conn = sqlite3.connect(DATABASE_PATH)
         cursor = conn.cursor()
         
-        cursor.execute('''
-            UPDATE threads 
-            SET summary = ?, summarized_at = ?
-            WHERE id = ?
-        ''', (summary, datetime.now().isoformat(), thread_id))
+        if ai_tags:
+            cursor.execute('''
+                UPDATE threads 
+                SET summary = ?, ai_tags = ?, summarized_at = ?
+                WHERE id = ?
+            ''', (summary, ai_tags, datetime.now().isoformat(), thread_id))
+        else:
+            cursor.execute('''
+                UPDATE threads 
+                SET summary = ?, summarized_at = ?
+                WHERE id = ?
+            ''', (summary, datetime.now().isoformat(), thread_id))
         
         conn.commit()
         conn.close()
@@ -114,6 +128,43 @@ def update_thread_summary(thread_id: int, summary: str) -> bool:
     except Exception as e:
         print(f"Error updating summary: {e}")
         return False
+
+def get_threads_by_tag(tag: str) -> List[Dict]:
+    """Get all threads that have a specific AI tag"""
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    # Search for tag in the comma-separated ai_tags field
+    cursor.execute('''
+        SELECT * FROM threads 
+        WHERE ai_tags LIKE ?
+        ORDER BY downloaded_at DESC
+    ''', (f'%{tag}%',))
+    
+    rows = cursor.fetchall()
+    threads = [dict(row) for row in rows]
+    
+    conn.close()
+    return threads
+
+def get_all_unique_tags() -> List[str]:
+    """Get all unique AI tags from the database"""
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT DISTINCT ai_tags FROM threads WHERE ai_tags IS NOT NULL AND ai_tags != ""')
+    rows = cursor.fetchall()
+    
+    # Parse comma-separated tags and collect unique ones
+    all_tags = set()
+    for row in rows:
+        if row[0]:
+            tags = [t.strip() for t in row[0].split(',')]
+            all_tags.update(tags)
+    
+    conn.close()
+    return sorted(list(all_tags))
 
 def get_threads_without_summary() -> List[Dict]:
     """Get all threads that don't have summaries yet"""
