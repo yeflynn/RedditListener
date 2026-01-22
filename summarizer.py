@@ -82,7 +82,7 @@ Provide a clear, objective summary:"""
             response = self.client.chat.completions.create(
                 model=model,
                 messages=[{'role': 'user', 'content': prompt}],
-                max_tokens=200
+                max_tokens=500  # Increased from 200 to allow complete summaries
             )
             summary = response.choices[0].message.content.strip()
             self.logger.info(f"Successfully generated summary ({len(summary)} chars) for: {title[:50]}...")
