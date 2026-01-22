@@ -96,9 +96,16 @@ class RedditScraper:
             self.logger.error(f"Could not extract subreddit name from URL: {subreddit_url}")
             return threads
         
-        # Normalize URL
+        # Normalize URL - use old.reddit.com for better scraping (shows 25 posts per page)
         if not subreddit_url.startswith('http'):
-            subreddit_url = f'https://www.reddit.com/r/{subreddit_name}/'
+            subreddit_url = f'https://old.reddit.com/r/{subreddit_name}/'
+        else:
+            # Convert www.reddit.com to old.reddit.com
+            subreddit_url = subreddit_url.replace('www.reddit.com', 'old.reddit.com')
+            subreddit_url = subreddit_url.replace('reddit.com', 'old.reddit.com')
+            # Ensure trailing slash
+            if not subreddit_url.endswith('/'):
+                subreddit_url += '/'
         
         try:
             # Rate limiting to avoid blocks with random delay
@@ -120,9 +127,18 @@ class RedditScraper:
             
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Find all post elements (shreddit-post tags)
-            # Increase limit significantly to ensure we get enough posts
+            # Try both old Reddit and new Reddit post structures
+            # Old Reddit uses <div class="thing" data-type="link">
+            # New Reddit uses <shreddit-post>
             posts = soup.find_all('shreddit-post', limit=max_threads * 5)
+            
+            if len(posts) < max_threads:
+                # Try old Reddit structure
+                self.logger.info(f"Found {len(posts)} new Reddit posts, trying old Reddit structure...")
+                old_posts = soup.find_all('div', {'class': 'thing', 'data-type': 'link'}, limit=max_threads * 2)
+                if old_posts:
+                    posts = old_posts
+                    self.logger.info(f"Using old Reddit structure, found {len(posts)} posts")
             
             self.logger.info(f"Found {len(posts)} post elements on page")
             
@@ -131,119 +147,157 @@ class RedditScraper:
                     break
                 
                 try:
-                    # Extract post ID
-                    post_id = post.get('id', '').replace('t3_', '')
-                    self.logger.debug(f"Processing post {len(threads)+1}/{max_threads}, post_id: {post_id}")
-                    if not post_id:
-                        self.logger.debug("Skipping post: No post_id found")
-                        continue
+                    # Detect if this is old Reddit or new Reddit structure
+                    is_old_reddit = post.name == 'div' and 'thing' in post.get('class', [])
                     
-                    # Extract text content from the post
-                    post_text = post.get_text(separator=' ', strip=True)
-                    self.logger.debug(f"Raw post text length: {len(post_text)} chars")
+                    if is_old_reddit:
+                        # Old Reddit parsing
+                        post_id = post.get('data-fullname', '').replace('t3_', '')
+                        if not post_id:
+                            post_id = post.get('id', '').replace('thing_t3_', '')
+                        
+                        # Extract title
+                        title_elem = post.find('a', {'class': 'title'})
+                        title = title_elem.get_text(strip=True) if title_elem else None
+                        
+                        # Extract author
+                        author_elem = post.find('a', {'class': 'author'})
+                        author = f"u/{author_elem.get_text(strip=True)}" if author_elem else 'Unknown'
+                        
+                        # Extract time
+                        time_elem = post.find('time')
+                        posted_time = time_elem.get('title', 'Unknown') if time_elem else 'Unknown'
+                        
+                        # Extract flair
+                        flair_elem = post.find('span', {'class': 'linkflairlabel'})
+                        flair = flair_elem.get_text(strip=True) if flair_elem else 'General'
+                        
+                        # Extract URL
+                        url_elem = post.find('a', {'class': 'title'})
+                        url = f"https://old.reddit.com{url_elem.get('href', '')}" if url_elem else f'https://old.reddit.com/r/{subreddit_name}/comments/{post_id}/'
+                        
+                        # Extract content (self-text if available)
+                        content_elem = post.find('div', {'class': 'expando'})
+                        content = content_elem.get_text(strip=True)[:500] if content_elem else ''
+                        
+                        self.logger.debug(f"Processing old Reddit post {len(threads)+1}/{max_threads}, post_id: {post_id}")
+                        
+                    else:
+                        # New Reddit parsing (existing logic)
+                        post_id = post.get('id', '').replace('t3_', '')
+                        self.logger.debug(f"Processing new Reddit post {len(threads)+1}/{max_threads}, post_id: {post_id}")
+                        if not post_id:
+                            self.logger.debug("Skipping post: No post_id found")
+                            continue
+                        
+                        # Extract text content from the post
+                        post_text = post.get_text(separator=' ', strip=True)
+                        self.logger.debug(f"Raw post text length: {len(post_text)} chars")
+                        
+                        # Log entire raw thread text for debugging
+                        self.logger.debug(f"Raw thread text for post {post_id}:")
+                        self.logger.debug(f"{'='*80}")
+                        self.logger.debug(post_text)
+                        self.logger.debug(f"{'='*80}")
+                        
+                        # Parse the text to extract components
+                        lines = [line.strip() for line in post_text.split('\n') if line.strip()]
+                        
+                        # Try to find title, author, and time
+                        title = None
+                        author = None
+                        posted_time = None
+                        flair = None
+                        content = ""
                     
-                    # Log entire raw thread text for debugging
-                    self.logger.debug(f"Raw thread text for post {post_id}:")
-                    self.logger.debug(f"{'='*80}")
-                    self.logger.debug(post_text)
-                    self.logger.debug(f"{'='*80}")
+                    # Only do complex parsing for new Reddit
+                    if not is_old_reddit:
+                        # Known flair patterns
+                        known_flairs = ['Discussion', 'Scam', 'Support', 'Question', 'Meta', 'General', 'Rumor', 'News']
+                        
+                        # Look for patterns in the text
+                        for i, line in enumerate(lines):
+                            # Extract title from line (may contain u/username)
+                            if len(line) > 20 and not title and 'ago' not in line:
+                                # Check if line contains u/username pattern
+                                if 'u/' in line:
+                                    # Extract text before u/username as title
+                                    match = re.match(r'^(.+?)\s+u/[\w-]+', line)
+                                    if match:
+                                        title = match.group(1).strip()
+                                        # Also extract author if present
+                                        author_match = re.search(r'u/([\w-]+)', line)
+                                        if author_match and not author:
+                                            author = 'u/' + author_match.group(1)
+                                else:
+                                    title = line
+                            
+                            # Author pattern (u/username) on separate line
+                            if line.startswith('u/') and not author:
+                                author = line
+                                # Check if next line is time
+                                if i + 1 < len(lines) and ('ago' in lines[i + 1] or 'hr' in lines[i + 1]):
+                                    posted_time = lines[i + 1]
+                            
+                            # Time pattern
+                            if 'ago' in line or ('hr' in line and '.' in line):
+                                if not posted_time:
+                                    posted_time = line
+                            
+                            # Flair patterns
+                            if line in known_flairs:
+                                flair = line
                     
-                    # Parse the text to extract components
-                    lines = [line.strip() for line in post_text.split('\n') if line.strip()]
-                    
-                    # Try to find title, author, and time
-                    title = None
-                    author = None
-                    posted_time = None
-                    flair = None
-                    content = ""
-                    
-                    # Known flair patterns
-                    known_flairs = ['Discussion', 'Scam', 'Support', 'Question', 'Meta', 'General', 'Rumor', 'News']
-                    
-                    # Look for patterns in the text
-                    for i, line in enumerate(lines):
-                        # Extract title from line (may contain u/username)
-                        if len(line) > 20 and not title and 'ago' not in line:
-                            # Check if line contains u/username pattern
-                            if 'u/' in line:
-                                # Extract text before u/username as title
-                                match = re.match(r'^(.+?)\s+u/[\w-]+', line)
-                                if match:
-                                    title = match.group(1).strip()
-                                    # Also extract author if present
-                                    author_match = re.search(r'u/([\w-]+)', line)
-                                    if author_match and not author:
-                                        author = 'u/' + author_match.group(1)
+                        # Clean up title - remove metadata patterns (only for new Reddit)
+                        if title:
+                            # Remove author mentions (u/username)
+                            title = re.sub(r'\s*u/[\w-]+\s*', ' ', title)
+                            # Remove bullet points and separators
+                            title = re.sub(r'\s*[•·]\s*', ' ', title)
+                            # Remove known flairs
+                            for flair_text in known_flairs:
+                                title = title.replace(flair_text, '')
+                            # Remove extra whitespace
+                            title = ' '.join(title.split())
+                            # If title appears twice (common pattern), take first occurrence
+                            words = title.split()
+                            if len(words) > 10:
+                                # Check if first half repeats
+                                half = len(words) // 2
+                                first_half = ' '.join(words[:half])
+                                if first_half in title[len(first_half):]:
+                                    title = first_half
+                            title = title.strip()
+                        
+                        # If we couldn't parse well, try alternative method
+                        if not title or len(title) < 3:
+                            # Get all text and take first substantial line (lowered threshold)
+                            for line in lines:
+                                if len(line) > 10 and 'u/' not in line and 'ago' not in line:
+                                    # Clean this title too
+                                    title = re.sub(r'\s*u/[\w-]+\s*', ' ', line)
+                                    title = re.sub(r'\s*[•·]\s*', ' ', title)
+                                    title = ' '.join(title.split()).strip()
+                                    if len(title) >= 3:
+                                        break
+                        
+                        # Ultimate fallback: use first non-empty line or post_id
+                        if not title or len(title) < 3:
+                            if lines:
+                                title = lines[0][:100]  # Take first line, max 100 chars
                             else:
-                                title = line
+                                title = f"Post {post_id}"  # Last resort: use post ID
                         
-                        # Author pattern (u/username) on separate line
-                        if line.startswith('u/') and not author:
-                            author = line
-                            # Check if next line is time
-                            if i + 1 < len(lines) and ('ago' in lines[i + 1] or 'hr' in lines[i + 1]):
-                                posted_time = lines[i + 1]
-                        
-                        # Time pattern
-                        if 'ago' in line or ('hr' in line and '.' in line):
-                            if not posted_time:
-                                posted_time = line
-                        
-                        # Flair patterns
-                        if line in known_flairs:
-                            flair = line
-                    
-                    # Clean up title - remove metadata patterns
-                    if title:
-                        # Remove author mentions (u/username)
-                        title = re.sub(r'\s*u/[\w-]+\s*', ' ', title)
-                        # Remove bullet points and separators
-                        title = re.sub(r'\s*[•·]\s*', ' ', title)
-                        # Remove known flairs
-                        for flair_text in known_flairs:
-                            title = title.replace(flair_text, '')
-                        # Remove extra whitespace
-                        title = ' '.join(title.split())
-                        # If title appears twice (common pattern), take first occurrence
-                        words = title.split()
-                        if len(words) > 10:
-                            # Check if first half repeats
-                            half = len(words) // 2
-                            first_half = ' '.join(words[:half])
-                            if first_half in title[len(first_half):]:
-                                title = first_half
-                        title = title.strip()
-                    
-                    # If we couldn't parse well, try alternative method
-                    if not title or len(title) < 3:
-                        # Get all text and take first substantial line (lowered threshold)
+                        # Content is usually after the metadata
+                        content_start = False
+                        content_parts = []
                         for line in lines:
-                            if len(line) > 10 and 'u/' not in line and 'ago' not in line:
-                                # Clean this title too
-                                title = re.sub(r'\s*u/[\w-]+\s*', ' ', line)
-                                title = re.sub(r'\s*[•·]\s*', ' ', title)
-                                title = ' '.join(title.split()).strip()
-                                if len(title) >= 3:
-                                    break
-                    
-                    # Ultimate fallback: use first non-empty line or post_id
-                    if not title or len(title) < 3:
-                        if lines:
-                            title = lines[0][:100]  # Take first line, max 100 chars
-                        else:
-                            title = f"Post {post_id}"  # Last resort: use post ID
-                    
-                    # Content is usually after the metadata
-                    content_start = False
-                    content_parts = []
-                    for line in lines:
-                        if content_start and line not in [title, author, posted_time, flair]:
-                            content_parts.append(line)
-                        elif line == flair or (posted_time and line == posted_time):
-                            content_start = True
-                    
-                    content = ' '.join(content_parts[:3]) if content_parts else post_text[:200]
+                            if content_start and line not in [title, author, posted_time, flair]:
+                                content_parts.append(line)
+                            elif line == flair or (posted_time and line == posted_time):
+                                content_start = True
+                        
+                        content = ' '.join(content_parts[:3]) if content_parts else post_text[:200]
                     
                     # Always save the thread (never skip)
                     created_date = self.parse_relative_time(posted_time) if posted_time else datetime.now().isoformat()
