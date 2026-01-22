@@ -17,8 +17,8 @@ class RedditScraper:
     
     def extract_subreddit_name(self, url: str) -> Optional[str]:
         """Extract subreddit name from URL"""
-        # Match patterns like /r/subreddit or reddit.com/r/subreddit
-        match = re.search(r'/r/([^/]+)', url)
+        # Match patterns like /r/subreddit or reddit.com/r/subreddit or just r/subreddit
+        match = re.search(r'/?r/([^/]+)', url)
         if match:
             return match.group(1)
         return None

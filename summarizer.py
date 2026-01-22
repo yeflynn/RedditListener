@@ -1,11 +1,8 @@
 """
 Gemini AI Summarization Module
-Uses Google's Gemini API to summarize Reddit threads
+Uses Google's Gemini API via OpenAI-compatible interface to summarize Reddit threads
 """
-try:
-    from google import genai
-except ImportError:
-    import google.generativeai as genai
+from openai import OpenAI
 import os
 from typing import Optional
 
@@ -21,24 +18,15 @@ class ThreadSummarizer:
         
         if not self.api_key:
             print("Warning: No Gemini API key provided. Summarization will not work.")
-            self.model = None
+            self.client = None
         else:
             try:
-                try:
-                    # Try new API first
-                    from google import genai as new_genai
-                    client = new_genai.Client(api_key=self.api_key)
-                    self.model = client.models.generate_content
-                    self.use_new_api = True
-                except:
-                    # Fall back to old API
-                    genai.configure(api_key=self.api_key)
-                    self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
-                    self.use_new_api = False
+                # Use OpenAI-compatible API
+                self.client = OpenAI(api_key=self.api_key)
                 print("Gemini AI initialized successfully")
             except Exception as e:
                 print(f"Error initializing Gemini: {e}")
-                self.model = None
+                self.client = None
     
     def summarize_thread(self, title: str, content: str) -> str:
         """
@@ -51,7 +39,7 @@ class ThreadSummarizer:
         Returns:
             Summary text
         """
-        if not self.model:
+        if not self.client:
             return "Summarization unavailable - No API key configured"
         
         try:
@@ -64,12 +52,12 @@ Content: {content}
 
 Provide a clear, objective summary:"""
             
-            if hasattr(self, 'use_new_api') and self.use_new_api:
-                response = self.model(model='gemini-2.0-flash-exp', contents=prompt)
-                summary = response.text.strip()
-            else:
-                response = self.model.generate_content(prompt)
-                summary = response.text.strip()
+            response = self.client.chat.completions.create(
+                model='gemini-2.5-flash',
+                messages=[{'role': 'user', 'content': prompt}],
+                max_tokens=200
+            )
+            summary = response.choices[0].message.content.strip()
             
             return summary
             
