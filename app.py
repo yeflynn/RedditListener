@@ -189,9 +189,6 @@ def api_thread(thread_id):
         return jsonify(thread)
     return jsonify({'error': 'Thread not found'}), 404
 
-if __name__ == '__main__':
-    port = int(os.getenv('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
 
 @app.route('/progress_stream/<progress_id>')
 def progress_stream(progress_id):
@@ -274,3 +271,7 @@ def progress_stream(progress_id):
     
     return Response(generate(), mimetype='text/event-stream')
 
+
+if __name__ == '__main__':
+    port = int(os.getenv('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=True)
