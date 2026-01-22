@@ -16,7 +16,8 @@ class ThreadSummarizer:
             api_key: Gemini API key (if None, will try to get from environment)
         """
         self.logger = get_logger('RedditListener')
-        self.api_key = api_key or os.getenv('GEMINI_API_KEY')
+        # Try OPENAI_API_KEY first (for Manus sandbox), then GEMINI_API_KEY
+        self.api_key = api_key or os.getenv('OPENAI_API_KEY') or os.getenv('GEMINI_API_KEY')
         
         if not self.api_key:
             self.logger.warning("No Gemini API key provided. Summarization will not work.")
