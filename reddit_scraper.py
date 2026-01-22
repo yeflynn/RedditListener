@@ -78,13 +78,14 @@ class RedditScraper:
         except:
             return datetime.now().isoformat()
     
-    def scrape_subreddit(self, subreddit_url: str, max_threads: int = 10) -> List[Dict]:
+    def scrape_subreddit(self, subreddit_url: str, max_threads: int = 10, fetch_full_content: bool = True) -> List[Dict]:
         """
         Scrape threads from a subreddit
         
         Args:
             subreddit_url: URL of the subreddit
             max_threads: Maximum number of threads to scrape
+            fetch_full_content: Whether to fetch full content from each thread page (slower but more complete)
             
         Returns:
             List of thread dictionaries
@@ -335,6 +336,15 @@ class RedditScraper:
                     }
                     
                     self.logger.debug(f"Parsed thread: title='{title[:60]}...', author={author}, posted_time={posted_time}, created_date={created_date}")
+                    
+                    # Fetch full content from thread page if enabled
+                    if fetch_full_content:
+                        self.logger.info(f"Fetching full content for thread {len(threads)+1}/{max_threads}...")
+                        full_content = self.fetch_thread_content(thread_data['url'])
+                        if full_content:
+                            thread_data['content'] = full_content
+                            self.logger.debug(f"Updated content with {len(full_content)} chars")
+                    
                     threads.append(thread_data)
                     self.logger.info(f"Successfully scraped thread {len(threads)}/{max_threads}: {title[:60]}...")
                 
@@ -359,6 +369,79 @@ class RedditScraper:
             return []
         
         return threads
+    
+    def fetch_thread_content(self, thread_url: str) -> str:
+        """
+        Fetch post content by visiting the individual thread page
+        
+        Args:
+            thread_url: URL of the thread to fetch
+            
+        Returns:
+            Post body content (self-text only, no comments)
+        """
+        try:
+            # Convert to old.reddit.com for better scraping
+            if 'old.reddit.com' not in thread_url:
+                if 'www.reddit.com' in thread_url:
+                    thread_url = thread_url.replace('www.reddit.com', 'old.reddit.com')
+                elif 'reddit.com' in thread_url:
+                    thread_url = thread_url.replace('reddit.com', 'old.reddit.com')
+            
+            # Rate limiting
+            if self.last_request_time > 0:
+                random_delay = random.uniform(self.min_request_interval, self.max_request_interval)
+                current_time = time.time()
+                time_since_last_request = current_time - self.last_request_time
+                
+                if time_since_last_request < random_delay:
+                    sleep_time = random_delay - time_since_last_request
+                    self.logger.debug(f"Rate limiting: sleeping for {sleep_time:.1f}s")
+                    time.sleep(sleep_time)
+            
+            self.logger.debug(f"Fetching post content from: {thread_url}")
+            response = requests.get(thread_url, headers=self.headers, timeout=15)
+            self.last_request_time = time.time()
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Find the main post area (not comments)
+            # Old Reddit: the first usertext-body inside the main post, not in comments
+            post_area = soup.find('div', {'class': 'expando'})
+            if post_area:
+                usertext = post_area.find('div', {'class': 'usertext-body'})
+                if usertext:
+                    # Get the markdown div for cleaner text
+                    md_div = usertext.find('div', {'class': 'md'})
+                    if md_div:
+                        post_body = md_div.get_text(separator='\n', strip=True)
+                    else:
+                        post_body = usertext.get_text(separator='\n', strip=True)
+                    
+                    if post_body and len(post_body) > 10:
+                        self.logger.debug(f"Fetched {len(post_body)} chars of post content")
+                        return post_body[:3000]  # Limit to 3000 chars
+            
+            # Fallback: try to find any self-text in the top-level post
+            # Look for the sitetable thing with the post
+            thing = soup.find('div', {'class': 'thing', 'data-type': 'link'})
+            if thing:
+                expando = thing.find('div', {'class': 'expando'})
+                if expando:
+                    usertext = expando.find('div', {'class': 'usertext-body'})
+                    if usertext:
+                        post_body = usertext.get_text(separator='\n', strip=True)
+                        if post_body and len(post_body) > 10:
+                            self.logger.debug(f"Fetched {len(post_body)} chars of post content (fallback)")
+                            return post_body[:3000]
+            
+            self.logger.debug("No post content found (may be a link post)")
+            return ""
+                
+        except Exception as e:
+            self.logger.error(f"Error fetching thread content from {thread_url}: {e}")
+            return ""
     
     def filter_by_date_range(self, threads: List[Dict], start_date: str, end_date: str) -> List[Dict]:
         """
