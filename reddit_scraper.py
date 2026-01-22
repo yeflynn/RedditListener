@@ -102,8 +102,11 @@ class RedditScraper:
         else:
             # Convert to old.reddit.com (avoid double 'old' prefix)
             if 'old.reddit.com' not in subreddit_url:
-                subreddit_url = subreddit_url.replace('www.reddit.com', 'old.reddit.com')
-                subreddit_url = subreddit_url.replace('reddit.com', 'old.reddit.com')
+                # Replace www.reddit.com first, then plain reddit.com (but not if already replaced)
+                if 'www.reddit.com' in subreddit_url:
+                    subreddit_url = subreddit_url.replace('www.reddit.com', 'old.reddit.com')
+                elif 'reddit.com' in subreddit_url:
+                    subreddit_url = subreddit_url.replace('reddit.com', 'old.reddit.com')
             # Ensure trailing slash
             if not subreddit_url.endswith('/'):
                 subreddit_url += '/'
