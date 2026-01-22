@@ -130,7 +130,8 @@ def summarize_thread(thread_id):
     
     try:
         # Get model from request or use default
-        data = request.get_json() or {}
+        # Use force=True to parse JSON even if Content-Type is not set correctly
+        data = request.get_json(force=True, silent=True) or {}
         model = data.get('model', os.getenv('GEMINI_MODEL', 'gemini-2.5-flash'))
         
         # Generate summary
