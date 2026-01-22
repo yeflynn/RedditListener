@@ -216,16 +216,23 @@ class RedditScraper:
                         title = title.strip()
                     
                     # If we couldn't parse well, try alternative method
-                    if not title or len(title) < 5:
-                        # Get all text and take first substantial line
+                    if not title or len(title) < 3:
+                        # Get all text and take first substantial line (lowered threshold)
                         for line in lines:
-                            if len(line) > 15 and 'u/' not in line and 'ago' not in line:
+                            if len(line) > 10 and 'u/' not in line and 'ago' not in line:
                                 # Clean this title too
                                 title = re.sub(r'\s*u/[\w-]+\s*', ' ', line)
                                 title = re.sub(r'\s*[•·]\s*', ' ', title)
                                 title = ' '.join(title.split()).strip()
-                                if len(title) >= 5:
+                                if len(title) >= 3:
                                     break
+                    
+                    # Ultimate fallback: use first non-empty line or post_id
+                    if not title or len(title) < 3:
+                        if lines:
+                            title = lines[0][:100]  # Take first line, max 100 chars
+                        else:
+                            title = f"Post {post_id}"  # Last resort: use post ID
                     
                     # Content is usually after the metadata
                     content_start = False
@@ -238,25 +245,23 @@ class RedditScraper:
                     
                     content = ' '.join(content_parts[:3]) if content_parts else post_text[:200]
                     
-                    if title:
-                        created_date = self.parse_relative_time(posted_time) if posted_time else datetime.now().isoformat()
-                        thread_data = {
-                            'thread_id': post_id,
-                            'subreddit': subreddit_name,
-                            'title': title,
-                            'author': author or 'Unknown',
-                            'posted_time': posted_time or 'Unknown',
-                            'created_date': created_date,
-                            'flair': flair or 'General',
-                            'content': content,
-                            'url': f'https://www.reddit.com/r/{subreddit_name}/comments/{post_id}/'
-                        }
-                        
-                        self.logger.debug(f"Parsed thread: title='{title[:60]}...', author={author}, posted_time={posted_time}, created_date={created_date}")
-                        threads.append(thread_data)
-                        self.logger.info(f"Successfully scraped thread {len(threads)}/{max_threads}: {title[:60]}...")
-                    else:
-                        self.logger.warning(f"Skipping post {post_id}: Could not extract title")
+                    # Always save the thread (never skip)
+                    created_date = self.parse_relative_time(posted_time) if posted_time else datetime.now().isoformat()
+                    thread_data = {
+                        'thread_id': post_id,
+                        'subreddit': subreddit_name,
+                        'title': title,
+                        'author': author or 'Unknown',
+                        'posted_time': posted_time or 'Unknown',
+                        'created_date': created_date,
+                        'flair': flair or 'General',
+                        'content': content,
+                        'url': f'https://www.reddit.com/r/{subreddit_name}/comments/{post_id}/'
+                    }
+                    
+                    self.logger.debug(f"Parsed thread: title='{title[:60]}...', author={author}, posted_time={posted_time}, created_date={created_date}")
+                    threads.append(thread_data)
+                    self.logger.info(f"Successfully scraped thread {len(threads)}/{max_threads}: {title[:60]}...")
                 
                 except Exception as e:
                     self.logger.error(f"Error parsing post {post_id if 'post_id' in locals() else 'unknown'}: {e}", exc_info=True)
