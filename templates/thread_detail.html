@@ -73,8 +73,16 @@ document.addEventListener('DOMContentLoaded', function() {
             
             try {
                 const response = await fetch(`/summarize/${threadId}`, {
-                    method: 'POST'
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({})
                 });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 
                 const data = await response.json();
                 
@@ -86,12 +94,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     `;
                     this.style.display = 'none';
                 } else {
-                    alert('Error: ' + (data.error || 'Unknown error'));
-                    this.disabled = false;
-                    this.textContent = '✨ Generate AI Summary';
+                    throw new Error(data.error || 'Unknown error');
                 }
             } catch (error) {
-                alert('Error generating summary: ' + error);
+                console.error('Summarization error:', error);
+                alert('Error generating summary: ' + error.message);
                 this.disabled = false;
                 this.textContent = '✨ Generate AI Summary';
             }
