@@ -100,9 +100,10 @@ class RedditScraper:
         if not subreddit_url.startswith('http'):
             subreddit_url = f'https://old.reddit.com/r/{subreddit_name}/'
         else:
-            # Convert www.reddit.com to old.reddit.com
-            subreddit_url = subreddit_url.replace('www.reddit.com', 'old.reddit.com')
-            subreddit_url = subreddit_url.replace('reddit.com', 'old.reddit.com')
+            # Convert to old.reddit.com (avoid double 'old' prefix)
+            if 'old.reddit.com' not in subreddit_url:
+                subreddit_url = subreddit_url.replace('www.reddit.com', 'old.reddit.com')
+                subreddit_url = subreddit_url.replace('reddit.com', 'old.reddit.com')
             # Ensure trailing slash
             if not subreddit_url.endswith('/'):
                 subreddit_url += '/'
