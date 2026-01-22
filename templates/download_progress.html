@@ -1,0 +1,260 @@
+{% extends "base.html" %}
+
+{% block title %}Downloading Threads - RedditListener{% endblock %}
+
+{% block content %}
+<div class="progress-container">
+    <h2>📥 Downloading Threads</h2>
+    
+    <div class="progress-info">
+        <p><strong>Subreddit:</strong> {{ subreddit_url }}</p>
+        <p><strong>Max Threads:</strong> {{ max_threads }}</p>
+    </p>
+    </div>
+    
+    <div class="progress-window" id="progressWindow">
+        <div class="progress-messages" id="progressMessages">
+            <div class="progress-message info">
+                <span class="icon">⏳</span>
+                <span class="text">Initializing download...</span>
+            </div>
+        </div>
+    </div>
+    
+    <div class="progress-actions">
+        <button id="viewThreadsBtn" class="btn btn-primary" style="display: none;" onclick="window.location.href='/threads'">
+            ✅ View Downloaded Threads
+        </button>
+        <button id="downloadMoreBtn" class="btn btn-secondary" style="display: none;" onclick="window.location.href='/'">
+            📥 Download More
+        </button>
+    </div>
+</div>
+
+<style>
+.progress-container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.progress-container h2 {
+    text-align: center;
+    color: #5b4fc7;
+    margin-bottom: 30px;
+}
+
+.progress-info {
+    background: #f8f9fa;
+    padding: 15px 20px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    border-left: 4px solid #5b4fc7;
+}
+
+.progress-info p {
+    margin: 5px 0;
+    color: #333;
+}
+
+.progress-window {
+    background: #1e1e1e;
+    border-radius: 8px;
+    padding: 20px;
+    height: 500px;
+    overflow-y: auto;
+    font-family: 'Courier New', monospace;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    margin-bottom: 20px;
+}
+
+.progress-messages {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.progress-message {
+    display: flex;
+    align-items: flex-start;
+    padding: 8px 12px;
+    border-radius: 4px;
+    animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.progress-message .icon {
+    margin-right: 10px;
+    font-size: 16px;
+}
+
+.progress-message .text {
+    flex: 1;
+    line-height: 1.5;
+}
+
+.progress-message.info {
+    background: rgba(91, 79, 199, 0.1);
+    color: #a8c5ff;
+}
+
+.progress-message.success {
+    background: rgba(76, 175, 80, 0.1);
+    color: #90ee90;
+}
+
+.progress-message.error {
+    background: rgba(244, 67, 54, 0.1);
+    color: #ff6b6b;
+}
+
+.progress-message.warning {
+    background: rgba(255, 152, 0, 0.1);
+    color: #ffb74d;
+}
+
+.progress-message.progress {
+    background: rgba(33, 150, 243, 0.1);
+    color: #64b5f6;
+}
+
+.progress-actions {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+}
+
+.btn {
+    padding: 12px 30px;
+    border: none;
+    border-radius: 6px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.btn-secondary {
+    background: #6c757d;
+    color: white;
+}
+
+.btn-secondary:hover {
+    background: #5a6268;
+    transform: translateY(-2px);
+}
+
+/* Scrollbar styling */
+.progress-window::-webkit-scrollbar {
+    width: 10px;
+}
+
+.progress-window::-webkit-scrollbar-track {
+    background: #2d2d2d;
+    border-radius: 4px;
+}
+
+.progress-window::-webkit-scrollbar-thumb {
+    background: #5b4fc7;
+    border-radius: 4px;
+}
+
+.progress-window::-webkit-scrollbar-thumb:hover {
+    background: #7b6fd7;
+}
+</style>
+
+<script>
+const progressId = '{{ progress_id }}';
+const progressWindow = document.getElementById('progressWindow');
+const progressMessages = document.getElementById('progressMessages');
+const viewThreadsBtn = document.getElementById('viewThreadsBtn');
+const downloadMoreBtn = document.getElementById('downloadMoreBtn');
+
+// Connect to Server-Sent Events stream
+const eventSource = new EventSource(`/progress_stream/${progressId}`);
+
+eventSource.onmessage = function(event) {
+    const data = JSON.parse(event.data);
+    
+    if (data.error) {
+        addMessage('❌ ' + data.error, 'error');
+        eventSource.close();
+        showButtons();
+        return;
+    }
+    
+    if (data.message) {
+        addMessage(data.message, data.type || 'info');
+    }
+    
+    if (data.completed) {
+        eventSource.close();
+        showButtons();
+    }
+};
+
+eventSource.onerror = function(error) {
+    console.error('EventSource error:', error);
+    addMessage('❌ Connection error. Please refresh the page.', 'error');
+    eventSource.close();
+    showButtons();
+};
+
+function addMessage(text, type) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `progress-message ${type}`;
+    
+    const icon = document.createElement('span');
+    icon.className = 'icon';
+    icon.textContent = getIcon(type);
+    
+    const textSpan = document.createElement('span');
+    textSpan.className = 'text';
+    textSpan.textContent = text;
+    
+    messageDiv.appendChild(icon);
+    messageDiv.appendChild(textSpan);
+    progressMessages.appendChild(messageDiv);
+    
+    // Auto-scroll to bottom
+    progressWindow.scrollTop = progressWindow.scrollHeight;
+}
+
+function getIcon(type) {
+    const icons = {
+        'info': '📝',
+        'success': '✅',
+        'error': '❌',
+        'warning': '⚠️',
+        'progress': '⏳'
+    };
+    return icons[type] || '•';
+}
+
+function showButtons() {
+    viewThreadsBtn.style.display = 'inline-block';
+    downloadMoreBtn.style.display = 'inline-block';
+}
+</script>
+{% endblock %}

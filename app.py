@@ -2,9 +2,12 @@
 RedditListener - Flask Web Application
 Main application file
 """
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, Response
 from datetime import datetime, timedelta
 import os
+import json
+import time
+import uuid
 from dotenv import load_dotenv
 
 # Import our modules
@@ -28,6 +31,9 @@ init_database()
 scraper = RedditScraper()
 summarizer = ThreadSummarizer()
 
+# Store progress data in memory
+progress_data = {}
+
 @app.route('/')
 def index():
     """Home page with input form"""
@@ -35,6 +41,11 @@ def index():
 
 @app.route('/download', methods=['POST'])
 def download_threads():
+    """Redirect to progress-enabled download"""
+    return download_with_progress()
+
+@app.route('/download_with_progress', methods=['POST'])
+def download_with_progress():
     """Handle thread download request"""
     try:
         # Get form data
@@ -51,27 +62,25 @@ def download_threads():
             flash('Max threads must be between 1 and 100', 'error')
             return redirect(url_for('index'))
         
-        # Scrape threads
-        flash(f'Downloading threads from {subreddit_url}...', 'info')
-        threads = scraper.scrape_subreddit(subreddit_url, max_threads)
+        # Generate unique progress ID
+        progress_id = str(uuid.uuid4())
         
-        if not threads:
-            flash('No threads found or error occurred during scraping', 'error')
-            return redirect(url_for('index'))
+        # Store parameters for the download process
+        progress_data[progress_id] = {
+            'status': 'starting',
+            'subreddit_url': subreddit_url,
+            'start_date': start_date,
+            'end_date': end_date,
+            'max_threads': max_threads,
+            'saved_count': 0,
+            'completed': False
+        }
         
-        # Filter by date range if provided
-        if start_date and end_date:
-            threads = scraper.filter_by_date_range(threads, start_date, end_date)
-            flash(f'Filtered to {len(threads)} threads within date range', 'info')
-        
-        # Save to database
-        saved_count = 0
-        for thread in threads:
-            if insert_thread(thread):
-                saved_count += 1
-        
-        flash(f'Successfully downloaded and saved {saved_count} threads!', 'success')
-        return redirect(url_for('view_threads'))
+        # Render progress page
+        return render_template('download_progress.html', 
+                             progress_id=progress_id,
+                             subreddit_url=subreddit_url,
+                             max_threads=max_threads)
         
     except Exception as e:
         flash(f'Error: {str(e)}', 'error')
@@ -169,3 +178,74 @@ def api_thread(thread_id):
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
+
+@app.route('/progress_stream/<progress_id>')
+def progress_stream(progress_id):
+    """Server-Sent Events stream for real-time progress"""
+    def generate():
+        if progress_id not in progress_data:
+            yield f"data: {json.dumps({'error': 'Invalid progress ID'})}\n\n"
+            return
+        
+        # Start the download process
+        try:
+            data = progress_data[progress_id]
+            subreddit_url = data['subreddit_url']
+            start_date = data['start_date']
+            end_date = data['end_date']
+            max_threads = data['max_threads']
+            
+            # Send initial message
+            yield f"data: {json.dumps({'message': f'🚀 Starting download from {subreddit_url}...', 'type': 'info'})}\n\n"
+            time.sleep(0.5)
+            
+            # Scrape threads with progress updates
+            yield f"data: {json.dumps({'message': f'📡 Fetching threads (max: {max_threads})...', 'type': 'info'})}\n\n"
+            threads = scraper.scrape_subreddit(subreddit_url, max_threads)
+            
+            if not threads:
+                yield f"data: {json.dumps({'message': '❌ No threads found or error occurred', 'type': 'error'})}\n\n"
+                yield f"data: {json.dumps({'completed': True, 'saved_count': 0})}\n\n"
+                return
+            
+            yield f"data: {json.dumps({'message': f'✅ Found {len(threads)} threads', 'type': 'success'})}\n\n"
+            time.sleep(0.3)
+            
+            # Filter by date range if provided
+            if start_date and end_date:
+                yield f"data: {json.dumps({'message': f'📅 Filtering by date range...', 'type': 'info'})}\n\n"
+                original_count = len(threads)
+                threads = scraper.filter_by_date_range(threads, start_date, end_date)
+                yield f"data: {json.dumps({'message': f'📊 Filtered: {len(threads)}/{original_count} threads match date range', 'type': 'info'})}\n\n"
+                time.sleep(0.3)
+            
+            # Save to database with progress
+            yield f"data: {json.dumps({'message': f'💾 Saving threads to database...', 'type': 'info'})}\n\n"
+            saved_count = 0
+            
+            for i, thread in enumerate(threads, 1):
+                if insert_thread(thread):
+                    saved_count += 1
+                    title_preview = thread['title'][:50] + '...' if len(thread['title']) > 50 else thread['title']
+                    yield f"data: {json.dumps({'message': f'✓ Saved ({i}/{len(threads)}): {title_preview}', 'type': 'progress'})}\n\n"
+                    time.sleep(0.2)  # Small delay for visibility
+                else:
+                    yield f"data: {json.dumps({'message': f'⊘ Skipped ({i}/{len(threads)}): Duplicate thread', 'type': 'warning'})}\n\n"
+            
+            # Final summary
+            yield f"data: {json.dumps({'message': f'🎉 Successfully saved {saved_count} threads!', 'type': 'success'})}\n\n"
+            time.sleep(0.5)
+            
+            # Send completion signal
+            yield f"data: {json.dumps({'completed': True, 'saved_count': saved_count})}\n\n"
+            
+            # Update progress data
+            data['completed'] = True
+            data['saved_count'] = saved_count
+            
+        except Exception as e:
+            yield f"data: {json.dumps({'message': f'❌ Error: {str(e)}', 'type': 'error'})}\n\n"
+            yield f"data: {json.dumps({'completed': True, 'saved_count': 0})}\n\n"
+    
+    return Response(generate(), mimetype='text/event-stream')
+
