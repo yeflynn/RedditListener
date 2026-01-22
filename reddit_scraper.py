@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import re
 from typing import List, Dict, Optional
 import time
+import random
 from logger_config import get_logger
 
 class RedditScraper:
@@ -23,7 +24,8 @@ class RedditScraper:
             'Upgrade-Insecure-Requests': '1'
         }
         self.last_request_time = 0
-        self.min_request_interval = 2  # Minimum 2 seconds between requests
+        self.min_request_interval = 5  # Minimum 5 seconds between requests
+        self.max_request_interval = 8  # Maximum 8 seconds (adds randomness)
     
     def extract_subreddit_name(self, url: str) -> Optional[str]:
         """Extract subreddit name from URL"""
@@ -92,13 +94,16 @@ class RedditScraper:
             subreddit_url = f'https://www.reddit.com/r/{subreddit_name}/'
         
         try:
-            # Rate limiting to avoid blocks
-            current_time = time.time()
-            time_since_last_request = current_time - self.last_request_time
-            if time_since_last_request < self.min_request_interval:
-                sleep_time = self.min_request_interval - time_since_last_request
-                self.logger.debug(f"Rate limiting: sleeping for {sleep_time:.2f} seconds")
-                time.sleep(sleep_time)
+            # Rate limiting to avoid blocks with random delay
+            if self.last_request_time > 0:  # Skip delay on first request
+                random_delay = random.uniform(self.min_request_interval, self.max_request_interval)
+                current_time = time.time()
+                time_since_last_request = current_time - self.last_request_time
+                
+                if time_since_last_request < random_delay:
+                    sleep_time = random_delay - time_since_last_request
+                    self.logger.info(f"Rate limiting: sleeping for {sleep_time:.1f} seconds (random delay)")
+                    time.sleep(sleep_time)
             
             self.logger.info(f"Fetching threads from {subreddit_url}...")
             response = requests.get(subreddit_url, headers=self.headers, timeout=10)
@@ -140,11 +145,26 @@ class RedditScraper:
                     content = ""
                     
                     # Known flair patterns
-                    known_flairs = ['Discussion', 'Scam', 'Support', 'Question', 'Meta', 'General']
+                    known_flairs = ['Discussion', 'Scam', 'Support', 'Question', 'Meta', 'General', 'Rumor', 'News']
                     
                     # Look for patterns in the text
                     for i, line in enumerate(lines):
-                        # Author pattern (u/username)
+                        # Extract title from line (may contain u/username)
+                        if len(line) > 20 and not title and 'ago' not in line:
+                            # Check if line contains u/username pattern
+                            if 'u/' in line:
+                                # Extract text before u/username as title
+                                match = re.match(r'^(.+?)\s+u/[\w-]+', line)
+                                if match:
+                                    title = match.group(1).strip()
+                                    # Also extract author if present
+                                    author_match = re.search(r'u/([\w-]+)', line)
+                                    if author_match and not author:
+                                        author = 'u/' + author_match.group(1)
+                            else:
+                                title = line
+                        
+                        # Author pattern (u/username) on separate line
                         if line.startswith('u/') and not author:
                             author = line
                             # Check if next line is time
@@ -152,17 +172,13 @@ class RedditScraper:
                                 posted_time = lines[i + 1]
                         
                         # Time pattern
-                        elif 'ago' in line or ('hr' in line and '.' in line):
+                        if 'ago' in line or ('hr' in line and '.' in line):
                             if not posted_time:
                                 posted_time = line
                         
                         # Flair patterns
-                        elif line in known_flairs:
+                        if line in known_flairs:
                             flair = line
-                        
-                        # Title is usually one of the longer lines before content
-                        elif len(line) > 20 and not title and 'ago' not in line and 'u/' not in line:
-                            title = line
                     
                     # Clean up title - remove metadata patterns
                     if title:
