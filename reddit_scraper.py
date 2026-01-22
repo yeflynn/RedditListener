@@ -103,11 +103,14 @@ class RedditScraper:
                 try:
                     # Extract post ID
                     post_id = post.get('id', '').replace('t3_', '')
+                    self.logger.debug(f"Processing post {len(threads)+1}/{max_threads}, post_id: {post_id}")
                     if not post_id:
+                        self.logger.debug("Skipping post: No post_id found")
                         continue
                     
                     # Extract text content from the post
                     post_text = post.get_text(separator=' ', strip=True)
+                    self.logger.debug(f"Raw post text length: {len(post_text)} chars")
                     
                     # Parse the text to extract components
                     lines = [line.strip() for line in post_text.split('\n') if line.strip()]
@@ -161,23 +164,27 @@ class RedditScraper:
                     content = ' '.join(content_parts[:3]) if content_parts else post_text[:200]
                     
                     if title:
+                        created_date = self.parse_relative_time(posted_time) if posted_time else datetime.now().isoformat()
                         thread_data = {
                             'thread_id': post_id,
                             'subreddit': subreddit_name,
                             'title': title,
                             'author': author or 'Unknown',
                             'posted_time': posted_time or 'Unknown',
-                            'created_date': self.parse_relative_time(posted_time) if posted_time else datetime.now().isoformat(),
+                            'created_date': created_date,
                             'flair': flair or 'General',
                             'content': content,
                             'url': f'https://www.reddit.com/r/{subreddit_name}/comments/{post_id}/'
                         }
                         
+                        self.logger.debug(f"Parsed thread: title='{title[:60]}...', author={author}, posted_time={posted_time}, created_date={created_date}")
                         threads.append(thread_data)
-                        self.logger.debug(f"Scraped thread: {title}")
+                        self.logger.info(f"Successfully scraped thread {len(threads)}/{max_threads}: {title[:60]}...")
+                    else:
+                        self.logger.warning(f"Skipping post {post_id}: Could not extract title")
                 
                 except Exception as e:
-                    self.logger.warning(f"Error parsing post: {e}")
+                    self.logger.error(f"Error parsing post {post_id if 'post_id' in locals() else 'unknown'}: {e}", exc_info=True)
                     continue
             
             self.logger.info(f"Successfully scraped {len(threads)} threads from {subreddit_name}")
@@ -203,19 +210,37 @@ class RedditScraper:
         """
         try:
             start = datetime.fromisoformat(start_date)
-            end = datetime.fromisoformat(end_date)
+            # Set end date to end of day (23:59:59) to include the entire end date
+            end = datetime.fromisoformat(end_date + 'T23:59:59')
+            self.logger.info(f"Filtering threads by date range: {start_date} to {end_date}")
+            self.logger.debug(f"Start datetime: {start}, End datetime: {end}")
             
             filtered = []
-            for thread in threads:
+            for i, thread in enumerate(threads, 1):
                 try:
                     thread_date = datetime.fromisoformat(thread['created_date'])
-                    if start <= thread_date <= end:
+                    in_range = start <= thread_date <= end
+                    
+                    self.logger.debug(f"Thread {i}/{len(threads)}: '{thread['title'][:40]}...'")
+                    self.logger.debug(f"  - Posted time: {thread.get('posted_time', 'Unknown')}")
+                    self.logger.debug(f"  - Created date: {thread['created_date']}")
+                    self.logger.debug(f"  - Parsed datetime: {thread_date}")
+                    self.logger.debug(f"  - In range ({start_date} to {end_date}): {in_range}")
+                    
+                    if in_range:
                         filtered.append(thread)
-                except:
+                        self.logger.info(f"✓ Thread {i} INCLUDED: {thread['title'][:50]}...")
+                    else:
+                        self.logger.info(f"✗ Thread {i} EXCLUDED: {thread['title'][:50]}... (date: {thread_date.date()})")
+                        
+                except Exception as e:
                     # If date parsing fails, include the thread
+                    self.logger.warning(f"Thread {i} date parsing failed ({e}), including by default: {thread['title'][:50]}...")
                     filtered.append(thread)
             
+            self.logger.info(f"Date filtering complete: {len(filtered)}/{len(threads)} threads match range")
             return filtered
-        except:
+        except Exception as e:
             # If date range parsing fails, return all threads
+            self.logger.error(f"Date range parsing failed: {e}, returning all threads", exc_info=True)
             return threads
