@@ -78,17 +78,18 @@ class RedditScraper:
         except:
             return datetime.now().isoformat()
     
-    def scrape_subreddit(self, subreddit_url: str, max_threads: int = 10, fetch_full_content: bool = True) -> List[Dict]:
+    def scrape_subreddit(self, subreddit_url: str, max_threads: int = 10, fetch_full_content: bool = True, existing_thread_ids: set = None) -> List[Dict]:
         """
         Scrape threads from a subreddit
         
         Args:
             subreddit_url: URL of the subreddit
-            max_threads: Maximum number of threads to scrape
+            max_threads: Maximum number of NEW threads to scrape (after deduplication)
             fetch_full_content: Whether to fetch full content from each thread page (slower but more complete)
+            existing_thread_ids: Set of thread IDs already in database (for deduplication)
             
         Returns:
-            List of thread dictionaries
+            List of thread dictionaries (only new threads not in existing_thread_ids)
         """
         threads = []
         subreddit_name = self.extract_subreddit_name(subreddit_url)
@@ -325,7 +326,12 @@ class RedditScraper:
                         
                         content = ' '.join(content_parts[:3]) if content_parts else post_text[:200]
                     
-                    # Always save the thread (never skip)
+                    # Check if thread already exists in database (deduplication)
+                    if existing_thread_ids and post_id in existing_thread_ids:
+                        self.logger.debug(f"Skipping duplicate thread (already in DB): {post_id}")
+                        continue
+                    
+                    # Build thread data
                     created_date = self.parse_relative_time(posted_time) if posted_time else datetime.now().isoformat()
                     thread_data = {
                         'thread_id': post_id,
@@ -350,7 +356,11 @@ class RedditScraper:
                             self.logger.debug(f"Updated content with {len(full_content)} chars")
                     
                     threads.append(thread_data)
-                    self.logger.info(f"Successfully scraped thread {len(threads)}/{max_threads}: {title[:60]}...")
+                    self.logger.info(f"Successfully scraped NEW thread {len(threads)}/{max_threads}: {title[:60]}...")
+                    
+                    # Add to existing_thread_ids to prevent duplicates within same scrape
+                    if existing_thread_ids is not None:
+                        existing_thread_ids.add(post_id)
                 
                 except Exception as e:
                     self.logger.error(f"Error parsing post {post_id if 'post_id' in locals() else 'unknown'}: {e}", exc_info=True)
@@ -446,6 +456,185 @@ class RedditScraper:
         except Exception as e:
             self.logger.error(f"Error fetching thread content from {thread_url}: {e}")
             return ""
+    
+    def scrape_subreddit_with_pagination(self, subreddit_url: str, max_new_threads: int = 10, 
+                                          fetch_full_content: bool = True, existing_thread_ids: set = None,
+                                          max_pages: int = 5) -> List[Dict]:
+        """
+        Scrape threads from a subreddit with pagination support.
+        Continues fetching pages until we have the requested number of NEW threads.
+        
+        Args:
+            subreddit_url: URL of the subreddit
+            max_new_threads: Number of NEW threads to scrape (after deduplication)
+            fetch_full_content: Whether to fetch full content from each thread page
+            existing_thread_ids: Set of thread IDs already in database
+            max_pages: Maximum number of pages to scrape (safety limit)
+            
+        Returns:
+            List of NEW thread dictionaries
+        """
+        all_new_threads = []
+        current_url = subreddit_url
+        pages_scraped = 0
+        
+        # Initialize existing_thread_ids if not provided
+        if existing_thread_ids is None:
+            existing_thread_ids = set()
+        else:
+            existing_thread_ids = existing_thread_ids.copy()  # Don't modify original
+        
+        subreddit_name = self.extract_subreddit_name(subreddit_url)
+        if not subreddit_name:
+            self.logger.error(f"Could not extract subreddit name from URL: {subreddit_url}")
+            return []
+        
+        # Normalize base URL
+        if not current_url.startswith('http'):
+            current_url = f'https://old.reddit.com/r/{subreddit_name}/new/'
+        else:
+            if 'old.reddit.com' not in current_url:
+                if 'www.reddit.com' in current_url:
+                    current_url = current_url.replace('www.reddit.com', 'old.reddit.com')
+                elif 'reddit.com' in current_url:
+                    current_url = current_url.replace('reddit.com', 'old.reddit.com')
+            if not current_url.endswith('/'):
+                current_url += '/'
+            if '/new' not in current_url and '/hot' not in current_url and '/top' not in current_url and '/rising' not in current_url:
+                current_url = current_url.rstrip('/') + '/new/'
+        
+        while len(all_new_threads) < max_new_threads and pages_scraped < max_pages:
+            pages_scraped += 1
+            self.logger.info(f"Scraping page {pages_scraped}/{max_pages}, have {len(all_new_threads)}/{max_new_threads} new threads")
+            
+            try:
+                # Rate limiting
+                if self.last_request_time > 0:
+                    random_delay = random.uniform(self.min_request_interval, self.max_request_interval)
+                    current_time = time.time()
+                    time_since_last_request = current_time - self.last_request_time
+                    
+                    if time_since_last_request < random_delay:
+                        sleep_time = random_delay - time_since_last_request
+                        self.logger.info(f"Rate limiting: sleeping for {sleep_time:.1f} seconds")
+                        time.sleep(sleep_time)
+                
+                self.logger.info(f"Fetching page: {current_url}")
+                response = requests.get(current_url, headers=self.headers, timeout=15)
+                self.last_request_time = time.time()
+                response.raise_for_status()
+                
+                soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # Find posts (old Reddit structure)
+                posts = soup.find_all('div', {'class': 'thing', 'data-type': 'link'})
+                self.logger.info(f"Found {len(posts)} posts on page {pages_scraped}")
+                
+                if not posts:
+                    self.logger.warning("No posts found on page, stopping pagination")
+                    break
+                
+                # Process each post
+                new_on_this_page = 0
+                for post in posts:
+                    if len(all_new_threads) >= max_new_threads:
+                        break
+                    
+                    try:
+                        post_id = post.get('data-fullname', '').replace('t3_', '')
+                        if not post_id:
+                            post_id = post.get('id', '').replace('thing_t3_', '')
+                        
+                        # Skip if already exists
+                        if post_id in existing_thread_ids:
+                            self.logger.debug(f"Skipping duplicate: {post_id}")
+                            continue
+                        
+                        # Extract thread data
+                        title_elem = post.find('a', {'class': 'title'})
+                        title = title_elem.get_text(strip=True) if title_elem else f"Post {post_id}"
+                        
+                        author_elem = post.find('a', {'class': 'author'})
+                        author = f"u/{author_elem.get_text(strip=True)}" if author_elem else 'Unknown'
+                        
+                        time_elem = post.find('time')
+                        posted_time = time_elem.get('title', 'Unknown') if time_elem else 'Unknown'
+                        
+                        flair_elem = post.find('span', {'class': 'linkflairlabel'})
+                        flair = flair_elem.get_text(strip=True) if flair_elem else 'General'
+                        
+                        # Extract content
+                        content = ''
+                        expando_elem = post.find('div', {'class': 'expando'})
+                        if expando_elem:
+                            usertext = expando_elem.find('div', {'class': 'usertext-body'})
+                            if usertext:
+                                content = usertext.get_text(separator=' ', strip=True)[:1000]
+                        
+                        if not content:
+                            entry = post.find('div', {'class': 'entry'})
+                            if entry:
+                                content = entry.get_text(separator=' ', strip=True)[:500]
+                        
+                        if not content or len(content) < 20:
+                            content = f"Link post: {title}" if title else "No content available"
+                        
+                        thread_url = f'https://www.reddit.com/r/{subreddit_name}/comments/{post_id}/'
+                        
+                        thread_data = {
+                            'thread_id': post_id,
+                            'subreddit': subreddit_name,
+                            'title': title,
+                            'author': author,
+                            'posted_time': posted_time,
+                            'created_date': self.parse_relative_time(posted_time) if posted_time else datetime.now().isoformat(),
+                            'flair': flair,
+                            'content': content,
+                            'url': thread_url
+                        }
+                        
+                        # Fetch full content if enabled
+                        if fetch_full_content:
+                            self.logger.info(f"Fetching full content for thread {len(all_new_threads)+1}/{max_new_threads}...")
+                            full_content = self.fetch_thread_content(thread_url)
+                            if full_content:
+                                thread_data['content'] = full_content
+                        
+                        all_new_threads.append(thread_data)
+                        existing_thread_ids.add(post_id)
+                        new_on_this_page += 1
+                        self.logger.info(f"Added NEW thread {len(all_new_threads)}/{max_new_threads}: {title[:50]}...")
+                        
+                    except Exception as e:
+                        self.logger.error(f"Error parsing post: {e}")
+                        continue
+                
+                self.logger.info(f"Page {pages_scraped}: Found {new_on_this_page} new threads")
+                
+                # Check if we have enough
+                if len(all_new_threads) >= max_new_threads:
+                    break
+                
+                # Find next page link
+                next_button = soup.find('span', {'class': 'next-button'})
+                if next_button:
+                    next_link = next_button.find('a')
+                    if next_link and next_link.get('href'):
+                        current_url = next_link.get('href')
+                        self.logger.info(f"Found next page: {current_url}")
+                    else:
+                        self.logger.info("No more pages available")
+                        break
+                else:
+                    self.logger.info("No next button found, reached end of subreddit")
+                    break
+                    
+            except Exception as e:
+                self.logger.error(f"Error scraping page {pages_scraped}: {e}")
+                break
+        
+        self.logger.info(f"Pagination complete: Scraped {pages_scraped} pages, found {len(all_new_threads)} new threads")
+        return all_new_threads
     
     def filter_by_date_range(self, threads: List[Dict], start_date: str, end_date: str) -> List[Dict]:
         """

@@ -184,6 +184,28 @@ def get_threads_without_summary() -> List[Dict]:
     conn.close()
     return threads
 
+def thread_exists(thread_id: str) -> bool:
+    """Check if a thread with the given thread_id already exists in the database"""
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT 1 FROM threads WHERE thread_id = ?', (thread_id,))
+    exists = cursor.fetchone() is not None
+    
+    conn.close()
+    return exists
+
+def get_existing_thread_ids() -> set:
+    """Get all existing thread IDs from the database"""
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT thread_id FROM threads')
+    rows = cursor.fetchall()
+    
+    conn.close()
+    return set(row[0] for row in rows if row[0])
+
 def clear_all_threads() -> bool:
     """Clear all threads from the database (for testing)"""
     try:

@@ -14,7 +14,8 @@ from dotenv import load_dotenv
 from database import (
     init_database, insert_thread, get_all_threads, 
     get_thread_by_id, update_thread_summary, get_threads_without_summary,
-    clear_all_threads, get_threads_by_tag, get_all_unique_tags
+    clear_all_threads, get_threads_by_tag, get_all_unique_tags,
+    thread_exists, get_existing_thread_ids
 )
 from reddit_scraper import RedditScraper
 from summarizer import ThreadSummarizer
@@ -257,19 +258,30 @@ def progress_stream(progress_id):
             yield f"data: {json.dumps({'message': f'🚀 Starting download from {subreddit_url}...', 'type': 'info'})}\n\n"
             time.sleep(0.5)
             
-            # Scrape threads with progress updates
-            logger.info(f'Starting scrape: {subreddit_url}, max_threads={max_threads}')
-            yield f"data: {json.dumps({'message': f'📡 Fetching threads (max: {max_threads})...', 'type': 'info'})}\n\n"
-            threads = scraper.scrape_subreddit(subreddit_url, max_threads)
-            logger.info(f'Scrape completed: Found {len(threads) if threads else 0} threads')
+            # Get existing thread IDs for deduplication
+            existing_ids = get_existing_thread_ids()
+            logger.info(f'Found {len(existing_ids)} existing threads in database')
+            yield f"data: {json.dumps({'message': f'📋 Found {len(existing_ids)} existing threads in database', 'type': 'info'})}\n\n"
+            time.sleep(0.3)
+            
+            # Scrape threads with pagination - will continue until we have max_threads NEW threads
+            logger.info(f'Starting scrape with pagination: {subreddit_url}, max_new_threads={max_threads}')
+            yield f"data: {json.dumps({'message': f'📡 Fetching {max_threads} NEW threads (will paginate if needed)...', 'type': 'info'})}\n\n"
+            
+            threads = scraper.scrape_subreddit_with_pagination(
+                subreddit_url, 
+                max_new_threads=max_threads,
+                existing_thread_ids=existing_ids
+            )
+            logger.info(f'Scrape completed: Found {len(threads) if threads else 0} NEW threads')
             
             if not threads:
-                logger.warning(f'No threads found for {subreddit_url}')
-                yield f"data: {json.dumps({'message': '❌ No threads found or error occurred', 'type': 'error'})}\n\n"
+                logger.warning(f'No NEW threads found for {subreddit_url}')
+                yield f"data: {json.dumps({'message': '❌ No NEW threads found (all may be duplicates)', 'type': 'error'})}\n\n"
                 yield f"data: {json.dumps({'completed': True, 'saved_count': 0})}\n\n"
                 return
             
-            yield f"data: {json.dumps({'message': f'✅ Found {len(threads)} threads', 'type': 'success'})}\n\n"
+            yield f"data: {json.dumps({'message': f'✅ Found {len(threads)} NEW threads', 'type': 'success'})}\n\n"
             time.sleep(0.3)
             
             # Filter by date range if provided
@@ -282,7 +294,7 @@ def progress_stream(progress_id):
                 time.sleep(0.3)
             
             # Save to database with progress
-            yield f"data: {json.dumps({'message': f'💾 Saving threads to database...', 'type': 'info'})}\n\n"
+            yield f"data: {json.dumps({'message': f'💾 Saving {len(threads)} threads to database...', 'type': 'info'})}\n\n"
             saved_count = 0
             
             for i, thread in enumerate(threads, 1):
